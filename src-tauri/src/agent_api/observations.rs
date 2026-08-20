@@ -55,13 +55,11 @@ pub(crate) fn record_document_work_lifecycle(
 
 #[cfg(debug_assertions)]
 pub(crate) fn record_document_work_progress(
-    target: crate::document_work::WorkLifecycleTarget,
     indexed_through: u64,
     checkpoint_count: u64,
     index_bytes: u64,
     directory_page_count: u64,
 ) {
-    record_document_work_lifecycle("progress", target);
     let Some(state) = STATE.get() else {
         return;
     };

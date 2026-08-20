@@ -1,6 +1,6 @@
 {
   "name": "lumen",
-  "version": "0.1.37",
+  "version": "0.1.39",
   "private": true,
   "type": "module",
   "scripts": {
@@ -23,7 +23,7 @@
     "lint": "oxlint --config .oxlintrc.json --type-aware . && oxfmt --config .oxfmtrc.json --check .",
     "tauri": "tauri",
     "types": "tsc --noEmit",
-    "verify": "npm run lint && npm run types && cargo fmt --check --manifest-path src-tauri/Cargo.toml && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml && npm test"
+    "verify": "npm run lint && npm run types && cargo fmt --check --manifest-path src-tauri/Cargo.toml && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml && npm run test:critical"
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.1"

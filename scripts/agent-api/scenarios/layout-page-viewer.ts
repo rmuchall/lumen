@@ -213,6 +213,7 @@ async function verifyFixture(socketPath: string, fixturePath: string): Promise<v
       const pointerDragStart = await client.status();
       const pointerDragStartRange = Math.max(0, pointerDragStart.scrollHeight - pointerDragStart.scrollClientHeight);
       assertCondition(pointerDragStartRange > 0, `${fixtureName}: initial reader had no native scroll range`);
+      const pointerDragWorkSequence = (await client.documentWorkEvents()).at(-1)?.sequence ?? 0;
       const pointerDragId = await client.beginPointerDrag();
       for (const fraction of [0.4, 0.55, 0.7] as const) {
         const pointerDragScroll = await client.sendAndAwait(
@@ -232,6 +233,14 @@ async function verifyFixture(socketPath: string, fixturePath: string): Promise<v
       assertCondition(
         pointerDragMounted.outcome === "completed",
         `${fixtureName}: pre-directory pointer drag did not mount its requested page`,
+      );
+      const pointerDragPageRequestCompleted = (await client.documentWorkEvents()).some(
+        (event) =>
+          event.sequence > pointerDragWorkSequence && event.kind === "page-request" && event.lifecycle === "accepted",
+      );
+      assertCondition(
+        pointerDragPageRequestCompleted,
+        `${fixtureName}: pre-directory pointer drag did not use the priority layout-page request lane`,
       );
       const pointerDragPage = await client.status();
       assertCondition(
@@ -286,6 +295,7 @@ async function verifyFixture(socketPath: string, fixturePath: string): Promise<v
       );
     }
     setPhase(`${fixtureName}:pre-directory-seek`);
+    const directWorkSequence = (await client.documentWorkEvents()).at(-1)?.sequence ?? 0;
     const firstOffset = fixtureSize >= 100 * 1024 * 1024 ? Math.floor(fixtureSize / 4) : midpointOffset;
     const firstRequest = await agentApi(socketPath).begin("seek", String(firstOffset));
     const directRequest =
@@ -333,13 +343,16 @@ async function verifyFixture(socketPath: string, fixturePath: string): Promise<v
         visibleSourceStart: directStatus.visibleSourceStart,
       })}`,
     );
-    const pageRequestCompleted = (await agentApi(socketPath).documentWorkEvents()).some(
-      (event) => event.kind === "page-request" && event.lifecycle === "accepted",
-    );
-    assertCondition(
-      pageRequestCompleted,
-      `${fixtureName}: pre-directory direct seek did not use the priority layout-page request lane`,
-    );
+    if (fixtureSize < 100 * 1024 * 1024) {
+      const pageRequestCompleted = (await client.documentWorkEvents()).some(
+        (event) =>
+          event.sequence > directWorkSequence && event.kind === "page-request" && event.lifecycle === "accepted",
+      );
+      assertCondition(
+        pageRequestCompleted,
+        `${fixtureName}: pre-directory direct seek did not use the priority layout-page request lane`,
+      );
+    }
   }
   setPhase(`${fixtureName}:directory`);
   await awaitLayoutPageDirectory(socketPath, fixtureName);

@@ -25,7 +25,7 @@ The manifests are authoritative for exact tool and dependency versions. Do not a
 | `web/src/`                      | Framework-independent viewer UI, local CSS, controls, and layout-page viewport.                     |
 | `web/src/shared-actions/`       | Shared frontend document, viewport, Find, and notice actions.                                       |
 | `web/src/agent-api/`            | Development-only Agent API listeners and completion reporting.                                      |
-| `fixtures/`                     | Checked-in compact visual/regression inputs and local image assets.                                 |
+| `fixtures/`                     | Checked-in compact automated regression inputs and local image assets.                              |
 | `fixtures/performance/`         | Generated, ignored, persistent 5/20/100 MiB read-only test inputs.                                  |
 | `scripts/agent-api/`            | Internal typed client, contract tests, scenarios, and diagnostic helpers. Never shipped.            |
 | `scripts/testing/`              | Internal isolation, suite orchestration, fixture generation, and pure-model tests. Never shipped.   |
@@ -48,7 +48,7 @@ Node runs the internal TypeScript scripts directly. TypeScript uses strict check
 | `npm run test:critical`                                                          | Run the source-change application tier.                               |
 | `npm run test:regular`                                                           | Run broader watcher, configuration, link, and viewer coverage.        |
 | `npm run test:stress`                                                            | Run the large-document stress matrix.                                 |
-| `npm run verify`                                                                 | Run static checks, Rust checks, and the default application suite.    |
+| `npm run verify`                                                                 | Run static checks, Rust checks, and the critical application tier.    |
 | `npm run test:production-artifact`                                               | Build release layers and verify that development-only code is absent. |
 
 [TESTING.md](TESTING.md) owns test selection, isolation, fixtures, completion receipts, diagnostics, and the opt-in performance command.
@@ -69,9 +69,10 @@ Lumen reads but never writes user configuration. Configuration changes apply aft
 The Debian package is the Linux release and dogfood artifact and registers Lumen for `text/markdown`.
 
 1. Deliberately update the matching versions in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json` when the release version changes.
-2. Run `npm run verify`.
-3. Run `npm run test:stress` after viewer, Markdown parser, scheduler, cache, or large-document changes.
-4. Run `npm run test:production-artifact`.
-5. Inspect and dogfood the Debian package before distribution.
+2. Run `npm run verify`. Its critical tier is the only application-test tier required specifically to create a release; do not run the regular or stress tiers merely because a release is being built.
+3. Run `npm run test:production-artifact`.
+4. Inspect and dogfood the Debian package before distribution.
+5. Create one release directory named `lumen-<version>-<platform>`, using the release version and platform identifier; for example, `lumen-0.1.39-linux-x86_64`.
+6. Place the platform package, `README.md`, and `THIRD_PARTY_NOTICES.md` in that directory. Do not place release files alongside the directory or add repository-development documents.
 
-Only `README.md` and `THIRD_PARTY_NOTICES.md` may accompany the production package. Git publication actions always require separate express authorization.
+`README.md` and `THIRD_PARTY_NOTICES.md` are mandatory and are the only documents that may accompany the production package. Git publication actions always require separate express authorization.

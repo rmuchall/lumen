@@ -30,6 +30,8 @@ Every document uses one file-backed layout-page pipeline:
 
 Source offsets establish order and semantic reader locations, not pixel height. Syntax, link destinations, embedded data, wrapping, and rich layout make source length an invalid visual-height estimate. Before the page directory completes, the native scrollbar represents stable logical source progress; afterward, canonical page geometry is authoritative. Geometry changes capture one semantic anchor and permit at most one validated restoration.
 
+While the native scrollbar thumb is held, the frontend mounts only the requested page from the prepared window. The canonical geometry and spacers preserve the native range; ordinary seeks and scrolling retain the surrounding page window. This keeps held-drag DOM work bounded without introducing another scrolling model.
+
 The canonical directory derives one page-height density from the already rendered first page and caps virtual geometry below WebKit's scroll-height ceiling. Later measurements refine the same geometry model at the current width; no transformed document fragment or second scrolling model exists.
 
 Structural Markdown displays first. A lazily created Rust document-work coordinator schedules exact reader-page preparation, Find, syntax/reference enrichment, and background indexing from separate bounded file sources. Its priority order is explicit Find navigation, reader-page preparation, Find counting, enrichment, then background indexing. A far reader request starts page preparation without waiting for the full index. The main thread adopts a result only when document generation, tab revision, source identity, page identity, input generation, and width state are still current, and the last valid mounted page remains visible until its replacement is ready.
@@ -42,7 +44,7 @@ If a source disappears, rendered content remains visible with a recoverable noti
 
 - `http` and `https` links delegate to the default browser. Readable local Markdown links open in Lumen; anchors remain inside the viewer. Other schemes are unsupported.
 - Local PNG, JPEG, GIF, and WebP files below the document directory use Tauri's asset protocol. Small Base64 images are accepted under a fixed limit. Remote and SVG images do not render.
-- Individually vendored solid Heroicons are the only icon source. Their notice and distributed paths are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+- Individually vendored solid Heroicons are the only interface-icon source. Their notice and distributed paths are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The locally authored Lumen mark is separate: `src-tauri/icons/icon.svg` is the editable source for the packaged PNG icon, and `web/src/assets/lumen-logo.svg` is its frontend asset.
 - Documents use platform system sans-serif and monospace fonts; they cannot select or bundle fonts.
 
 ## Interface, configuration, and state

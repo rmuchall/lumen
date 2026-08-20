@@ -5,7 +5,19 @@ import {fileURLToPath} from "node:url";
 const repositoryRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const distributionDirectory = join(repositoryRoot, "web", "dist");
 const releaseExecutable = join(repositoryRoot, "src-tauri", "target", "release", "lumen");
-const forbiddenFragments = ["agent-api-v1", "agent-event-", "report_agent_event_completion", "scripts/agent-api"];
+const forbiddenFragments = [
+  "agent-api-v3 protocol=3",
+  "agent-event-",
+  "report_agent_event_completion",
+  "report_agent_frontend_ready",
+  "agent-observation-",
+  "update_test_run_state",
+  "page-display-complete",
+  "page-work-requested",
+  "native-scroll-received",
+  "wheel-input",
+  "scripts/agent-api",
+];
 const startedAt = Date.now();
 
 async function distributionFiles(directory: string): Promise<string[]> {

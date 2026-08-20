@@ -732,7 +732,6 @@ fn page_request_step(shared: &WorkerShared, mut active: ActivePageRequest) -> St
         let (indexed_through, checkpoint_count, index_bytes, directory_page_count) =
             active.index.agent_observation_counts();
         crate::agent_api::record_document_work_progress(
-            lifecycle,
             indexed_through,
             checkpoint_count,
             index_bytes,
@@ -833,7 +832,6 @@ fn index_step(shared: &WorkerShared, mut active: ActiveIndex) -> StepOutcome {
         let (indexed_through, checkpoint_count, index_bytes, directory_page_count) =
             active.index.agent_observation_counts();
         crate::agent_api::record_document_work_progress(
-            lifecycle,
             indexed_through,
             checkpoint_count,
             index_bytes,

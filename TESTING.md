@@ -48,14 +48,16 @@ The path must not already exist. Read it only after the wrapper exits. A zero ex
 | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------- | ------------------------------------------------------ |
 | `npm run test:case -- <name>`                                                  | One independently isolated application behaviour.                             | Reproduction and focused regression work.              |
 | `npm run test:critical`                                                        | Agent API contract, clean launch, core viewer/Find/tabs/errors, 5 MiB viewer. | After every source change.                             |
-| `npm run test:regular`                                                         | Critical plus watcher, configuration, links, notices, and 20 MiB cases.       | Before handoff or dogfood.                             |
-| `npm run test:stress`                                                          | 5/20/100 MiB content matrix and repeated viewer interactions.                 | Before release and after large-document pipeline work. |
+| `npm run test:regular`                                                         | Critical plus watcher, configuration, links, notices, and 20 MiB cases.       | Broader non-release handoff or investigation coverage. |
+| `npm run test:stress`                                                          | 5/20/100 MiB content matrix and repeated viewer interactions.                 | After large-document pipeline work or investigation.   |
 | `npm test`                                                                     | Critical followed by regular.                                                 | Default application suite.                             |
-| `npm run verify`                                                               | Static, Rust, critical, and regular checks.                                   | Ordinary full verification.                            |
+| `npm run verify`                                                               | Static checks, Rust checks, and the critical application tier.                | Default verification and release gate.                 |
 | `npm run test:production-artifact`                                             | Release build and development/test exclusion scan.                            | Before release.                                        |
 | `npm run test:performance -- --scenario <name> --record performance/<name>.md` | One opt-in measurement scenario.                                              | Explicit performance investigation only.               |
 
 `npm run test:clean` removes owned resources from an interrupted run and is invoked by each application suite. Before any run, verify that no unrelated Lumen instance, agent socket, or earlier test writer remains. Never rerun a yielded suite; preserve and poll its live session until it exits.
+
+Release creation requires the critical application tier only. The regular and stress tiers remain available for change-specific evidence and investigations, but are not release gates and must not be run solely because a release is being created. Release static, Rust, and production-artifact checks remain mandatory as listed in [DEVELOPMENT.md](DEVELOPMENT.md).
 
 Test-suite composition is mandatory. New application behaviour first receives one independently runnable focused case with an explicit fixture and Agent API boundary; only then may it join a tier. `scripts/testing/run-tier.ts` is the executable list of supported cases and tier membership. Tier composition must never make one case depend on state from another.
 

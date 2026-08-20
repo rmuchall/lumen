@@ -2,12 +2,12 @@ import {invoke} from "@tauri-apps/api/core";
 import {listen} from "@tauri-apps/api/event";
 import lumenLogoUrl from "./assets/lumen-logo.svg";
 import "./main.css";
-import {installAgentListeners, type AgentEventLifecycle} from "./agent-api/listeners";
+import type {AgentEventLifecycle} from "./agent-api/listeners";
 import {installCodeCopyControls} from "./code-copy";
 import {createDocumentBar} from "./document-bar";
 import {createFindController, type RustFindNavigation, type RustFindProgress} from "./find";
 import {createRecoverableNoticeController} from "./shared-actions/notices";
-import {createScrollDiagnostics} from "./scroll-diagnostics";
+import type {ScrollDiagnostics} from "./scroll-diagnostics";
 import {createDocumentActions} from "./shared-actions/documents";
 import {createFindActions} from "./shared-actions/find";
 import {createViewportActions} from "./shared-actions/viewport";
@@ -41,30 +41,14 @@ const markdownElement = document.createElement("article");
 viewerScrollElement.classList.add("viewer-scroll");
 viewerScrollElement.append(markdownElement);
 let viewportCoordinator: ViewportCoordinator | null = null;
+let scrollDiagnostics: ScrollDiagnostics | null = null;
+const trace: ScrollDiagnostics["trace"] | undefined = import.meta.env.DEV
+  ? (...arguments_) => scrollDiagnostics?.trace(...arguments_)
+  : undefined;
 const layoutPageViewport = createLayoutPageViewport(markdownElement, viewerScrollElement, (observation) => {
-  scrollDiagnostics.trace("layout-measurements-observed", observation);
+  trace?.("layout-measurements-observed", observation);
   viewportCoordinator?.commitMeasurements();
 });
-const scrollDiagnostics = createScrollDiagnostics(markdownElement, viewerScrollElement, layoutPageViewport, () => ({
-  activeAgentRequestId: viewportCoordinator?.state().activeAgentRequestId ?? null,
-  activeDragId: viewportCoordinator?.state().activeDragId ?? null,
-  documentGeneration: viewportCoordinator?.state().documentGeneration ?? 0,
-  geometryRevision: layoutPageViewport.geometryRevision(),
-  inputGeneration: viewportCoordinator?.state().inputGeneration ?? 0,
-  measurementCommitActive: viewportCoordinator?.state().measurementCommitActive ?? false,
-  pageGeneration: viewportCoordinator?.state().pageGeneration ?? 0,
-  pendingPageRequest: viewportCoordinator?.state().pendingPageRequest ?? false,
-  readerInputActive: viewportCoordinator?.state().readerInputActive ?? false,
-  scrollWritePending: viewportCoordinator?.state().scrollWritePending ?? false,
-  viewportAnchor: viewportCoordinator?.state().viewportAnchor ?? 0,
-  widthEpoch: layoutPageViewport.widthEpoch(),
-}));
-if (import.meta.env.DEV) {
-  const resizeDiagnosticsObserver = new ResizeObserver(() => {
-    void scrollDiagnostics.reportScrollState(true);
-  });
-  resizeDiagnosticsObserver.observe(viewerScrollElement);
-}
 const buildMarkerElement = document.createElement("p");
 const documentBar = createDocumentBar();
 let testRunBanner: TestRunBanner | null = null;
@@ -210,7 +194,7 @@ const findController = createFindController(
     return Promise.resolve({matchOffset: null});
   },
   (sourceOffset) => {
-    scrollDiagnostics.trace("find-navigation-requested", `source_offset=${sourceOffset}`);
+    trace?.("find-navigation-requested", `source_offset=${sourceOffset}`);
     return new Promise<boolean>((resolve) => {
       viewportActions.seek(sourceOffset, (outcome) => {
         resolve(outcome === "completed" || layoutPageViewport.containsSourceOffset(sourceOffset));
@@ -275,7 +259,7 @@ viewportCoordinator = createViewportCoordinator({
   onInputSettled: applyPendingLayoutPageDirectory,
   onError: (message) => recoverableNotices.show("document", "error", message),
   onStable: () => {
-    scrollDiagnostics.trace("layout-settled", `source=${viewportCoordinator?.inputAnchor() ?? 0}`);
+    trace?.("layout-settled", `source=${viewportCoordinator?.inputAnchor() ?? 0}`);
     agentEvents?.viewportStable(hasTerminalLayout());
   },
   persistPosition: (sourceOffset, scrollPosition, tabId, tabRevision) =>
@@ -288,7 +272,7 @@ viewportCoordinator = createViewportCoordinator({
   queueEnrichment: queuePageEnrichment,
   requestPageBatch: (sourceOffset, tabId, tabRevision) =>
     invoke<ViewerPageBatchResponse>("viewer_page_batch", {sourceOffset, tabId, tabRevision}),
-  trace: (eventName, detail, correlation) => scrollDiagnostics.trace(eventName, detail, correlation),
+  trace: (eventName, detail, correlation) => trace?.(eventName, detail, correlation),
   viewerScrollElement,
   viewport: layoutPageViewport,
 });
@@ -344,7 +328,7 @@ function showBlockingError(message: string): void {
   titleElement.textContent = "Error: Document error";
   messageElement.textContent = message;
   layoutPageViewport.clear();
-  scrollDiagnostics.trace("viewport-state", "state=error");
+  trace?.("viewport-state", "state=error");
   markdownElement.replaceChildren(titleElement, messageElement);
   updateLinkStatus(null);
 }
@@ -361,7 +345,7 @@ function showEmptyViewer(): void {
   messageElement.textContent = "Choose File → Open… to view a Markdown document.";
   layoutPageViewport.clear();
   markdownElement.replaceChildren(logoElement, titleElement, messageElement);
-  scrollDiagnostics.trace("viewport-state", "state=empty");
+  trace?.("viewport-state", "state=empty");
   updateLinkStatus(null);
   recoverableNotices.clear("document");
 }
@@ -408,14 +392,11 @@ function displayMarkdown(
   findController.refreshVisible(preferViewportFindMatch, false);
   const lastPage = pages.at(-1) ?? firstPage;
   agentEvents?.pageDisplayed(firstPage.sourceStart, lastPage.sourceEnd, findController.agentObservation());
-  scrollDiagnostics.trace(
+  trace?.(
     "reader-position-displayed",
     `source_start=${firstPage.sourceStart} source_end=${lastPage.sourceEnd} source=${viewportCoordinator?.inputAnchor() ?? firstPage.sourceStart}`,
   );
-  scrollDiagnostics.trace(
-    "viewport-state",
-    `state=rendered page_generation=${viewportCoordinator?.pageGeneration() ?? 0}`,
-  );
+  trace?.("viewport-state", `state=rendered page_generation=${viewportCoordinator?.pageGeneration() ?? 0}`);
   recoverableNotices.clear("document");
   if (resetLayout && activeViewerTabId !== 0) {
     void invoke<boolean>("viewer_first_page_displayed", {
@@ -423,14 +404,11 @@ function displayMarkdown(
       tabRevision: activeViewerTabRevision,
     });
   }
-  scrollDiagnostics.trace(
+  trace?.(
     "page-display-complete",
     `total_ms=${(performance.now() - displayStartedAt).toFixed(1)} viewport_ms=${(viewportReadyAt - displayStartedAt).toFixed(1)} controls_ms=${(controlsReadyAt - viewportReadyAt).toFixed(1)} page_count=${pages.length} source_start=${firstPage.sourceStart} source_end=${firstPage.sourceEnd}`,
   );
-  scrollDiagnostics.trace(
-    "page-window-mounted",
-    `count=${pages.length} start=${firstPage.sourceStart} end=${lastPage.sourceEnd}`,
-  );
+  trace?.("page-window-mounted", `count=${pages.length} start=${firstPage.sourceStart} end=${lastPage.sourceEnd}`);
 }
 
 async function enrichDisplayedPage(page: ViewerPage): Promise<void> {
@@ -438,7 +416,7 @@ async function enrichDisplayedPage(page: ViewerPage): Promise<void> {
   const requestedPageGeneration = viewportCoordinator?.pageGeneration() ?? 0;
   const requestedTabId = activeViewerTabId;
   const requestedTabRevision = activeViewerTabRevision;
-  scrollDiagnostics.trace(
+  trace?.(
     "page-enrichment-requested",
     `start=${page.sourceStart} end=${page.sourceEnd} generation=${requestedPageGeneration}`,
   );
@@ -476,9 +454,9 @@ function applyEnrichedPage(sourceStart: number, sourceEnd: number, html: string)
   installCodeCopyControls(pageElement);
   layoutPageViewport.reconcileHeldNativeRange();
   findController.refreshVisible(true, false);
-  scrollDiagnostics.trace(
+  trace?.(
     "page-enrichment-applied",
-    () => `${scrollDiagnostics.geometry()} start=${sourceStart} end=${sourceEnd}`,
+    () => `${scrollDiagnostics?.geometry() ?? ""} start=${sourceStart} end=${sourceEnd}`,
   );
 }
 
@@ -539,7 +517,7 @@ async function loadLayoutPageDirectory(tabId: number, tabRevision: number): Prom
     const pendingDirectory = {directory, documentGeneration: requestedGeneration, tabId, tabRevision};
     if (viewportCoordinator?.isPointerInteractionActive()) {
       pendingLayoutPageDirectory = pendingDirectory;
-      scrollDiagnostics.trace("layout-directory-deferred", `tab=${tabId} revision=${tabRevision}`);
+      trace?.("layout-directory-deferred", `tab=${tabId} revision=${tabRevision}`);
       return;
     }
     applyLayoutPageDirectory(pendingDirectory);
@@ -565,10 +543,7 @@ function applyLayoutPageDirectory(pendingDirectory: PendingLayoutPageDirectory):
   viewportCoordinator?.setAnchor(sourceAnchor);
   viewportCoordinator?.applySyntheticScrollPosition(layoutPageViewport.scrollPositionForSourceOffset(sourceAnchor));
   layoutPageDirectoryReady = true;
-  scrollDiagnostics.trace(
-    "layout-directory-applied",
-    `tab=${pendingDirectory.tabId} revision=${pendingDirectory.tabRevision}`,
-  );
+  trace?.("layout-directory-applied", `tab=${pendingDirectory.tabId} revision=${pendingDirectory.tabRevision}`);
   agentEvents?.layoutPageDirectoryReady();
   viewportCoordinator?.directoryBecameReady();
 }
@@ -826,7 +801,6 @@ async function restartLumen(): Promise<void> {
 }
 
 async function installViewerEvents(): Promise<void> {
-  await installTestRunBanner();
   await Promise.all([
     listen("markdown-file-changed", () => void handleWatchedMarkdownChange()),
     listen("viewer-reload", () => void handleViewerReload()),
@@ -885,18 +859,50 @@ async function installViewerEvents(): Promise<void> {
       pendingFindNavigation = null;
       pending.resolve({matchOffset});
     }),
+    listen("viewer-configuration-changed", handleConfigurationChanged),
+  ]);
+
+  if (!import.meta.env.DEV) {
+    return;
+  }
+
+  await installTestRunBanner();
+  const [{installAgentListeners}, {createScrollDiagnostics}] = await Promise.all([
+    import("./agent-api/listeners"),
+    import("./scroll-diagnostics"),
+  ]);
+  const diagnostics = createScrollDiagnostics(markdownElement, viewerScrollElement, layoutPageViewport, () => ({
+    activeAgentRequestId: viewportCoordinator?.state().activeAgentRequestId ?? null,
+    activeDragId: viewportCoordinator?.state().activeDragId ?? null,
+    documentGeneration: viewportCoordinator?.state().documentGeneration ?? 0,
+    geometryRevision: layoutPageViewport.geometryRevision(),
+    inputGeneration: viewportCoordinator?.state().inputGeneration ?? 0,
+    measurementCommitActive: viewportCoordinator?.state().measurementCommitActive ?? false,
+    pageGeneration: viewportCoordinator?.state().pageGeneration ?? 0,
+    pendingPageRequest: viewportCoordinator?.state().pendingPageRequest ?? false,
+    readerInputActive: viewportCoordinator?.state().readerInputActive ?? false,
+    scrollWritePending: viewportCoordinator?.state().scrollWritePending ?? false,
+    viewportAnchor: viewportCoordinator?.state().viewportAnchor ?? 0,
+    widthEpoch: layoutPageViewport.widthEpoch(),
+  }));
+  scrollDiagnostics = diagnostics;
+  const resizeDiagnosticsObserver = new ResizeObserver(() => {
+    void diagnostics.reportScrollState(true);
+  });
+  resizeDiagnosticsObserver.observe(viewerScrollElement);
+  await Promise.all([
     installAgentListeners({
       activeTabId: () => activeViewerTabId,
       activateNotice: recoverableNotices.activate,
       beginPointerDrag: (dragId) => beginViewportPointerInteraction(dragId),
-      beginViewportTrace: (traceId, label) => scrollDiagnostics.beginViewportTrace(traceId, label),
+      beginViewportTrace: (traceId, label) => diagnostics.beginViewportTrace(traceId, label),
       closeTabs: documentActions.closeTabs,
       copyDocumentPath: documentBar.copyPath,
       captureDisplayedHtml,
       directoryReady: () => layoutPageDirectoryReady,
       dismissNotice: recoverableNotices.dismiss,
       endPointerDrag: (dragId) => endViewportPointerInteraction(dragId),
-      endViewportTrace: (traceId) => scrollDiagnostics.endViewportTrace(traceId),
+      endViewportTrace: (traceId) => diagnostics.endViewportTrace(traceId),
       findClear: findActions.clear,
       findObservation: () => findController.agentObservation(),
       findNext: findActions.requestNext,
@@ -921,11 +927,11 @@ async function installViewerEvents(): Promise<void> {
       openPath: async (path) => {
         const opened = await documentActions.openPath(path);
         if (opened) {
-          await scrollDiagnostics.reportScrollState(true);
+          await diagnostics.reportScrollState(true);
         }
         return opened;
       },
-      readViewportTrace: (traceId, afterSequence) => scrollDiagnostics.readViewportTrace(traceId, afterSequence),
+      readViewportTrace: (traceId, afterSequence) => diagnostics.readViewportTrace(traceId, afterSequence),
       reloadDocument: async () => {
         try {
           await invoke<void>("reload_document");
@@ -934,7 +940,7 @@ async function installViewerEvents(): Promise<void> {
           return false;
         }
       },
-      reportScrollState: () => scrollDiagnostics.reportScrollState(true),
+      reportScrollState: () => diagnostics.reportScrollState(true),
       scrollTo: (position, onCompletion, requestId) => {
         if (viewportCoordinator === null) {
           onCompletion("failed");
@@ -943,7 +949,7 @@ async function installViewerEvents(): Promise<void> {
         viewportCoordinator.scrollToPosition(
           position,
           (outcome) => {
-            void scrollDiagnostics.reportScrollState(true).then(
+            void diagnostics.reportScrollState(true).then(
               () => onCompletion(outcome),
               () => onCompletion("failed"),
             );
@@ -955,7 +961,7 @@ async function installViewerEvents(): Promise<void> {
       selectTab: async (tabId) => {
         const selected = await documentActions.selectTab(tabId);
         if (selected) {
-          await scrollDiagnostics.reportScrollState(true);
+          await diagnostics.reportScrollState(true);
         }
         return selected;
       },
@@ -990,10 +996,9 @@ async function installViewerEvents(): Promise<void> {
       agentEvents = events;
     }),
     listen("agent-watcher-ready", () => agentEvents?.watcherReady()),
-    listen("viewer-configuration-changed", handleConfigurationChanged),
     listen("agent-observation-scroll-probe", () => {
-      scrollDiagnostics.trace("scroll-probe", () => scrollDiagnostics.geometry());
-      void scrollDiagnostics.reportScrollState(true);
+      diagnostics.trace("scroll-probe", () => diagnostics.geometry());
+      void diagnostics.reportScrollState(true);
     }),
     listen("agent-observation-find-probe", () => {
       const findState = findController.agentObservation();
@@ -1073,16 +1078,18 @@ window.addEventListener(
   },
   {passive: true},
 );
-window.addEventListener(
-  "wheel",
-  (event) => {
-    scrollDiagnostics.trace(
-      "wheel-input",
-      `delta_mode=${event.deltaMode} delta_x=${event.deltaX.toFixed(1)} delta_y=${event.deltaY.toFixed(1)}`,
-    );
-  },
-  {passive: true},
-);
+if (import.meta.env.DEV) {
+  window.addEventListener(
+    "wheel",
+    (event) => {
+      trace?.(
+        "wheel-input",
+        `delta_mode=${event.deltaMode} delta_x=${event.deltaX.toFixed(1)} delta_y=${event.deltaY.toFixed(1)}`,
+      );
+    },
+    {passive: true},
+  );
+}
 
 if (import.meta.env.DEV) {
   buildMarkerElement.classList.add("development-build-marker");

@@ -66,17 +66,17 @@ Routine events, observations, and logs contain no document content. `displayed-h
 
 `viewport-trace-begin <label>`, `viewport-trace-read <trace-id> [after-sequence]`, and `viewport-trace-end <trace-id>` manage one opt-in, content-free frontend trace. Its ID increases strictly, its lowercase-hyphen label is at most 64 bytes, and it deliberately spans document-generation changes. It retains at most 256 records and a 48 KiB snapshot; records carry monotonic elapsed time, request/drag IDs when applicable, bounded scroll and source positions, current generations, anchor state, and at most 512 bytes of diagnostic detail. A socket read transfers the snapshot through no more than six 8 KiB invoke chunks. Truncation and the first omitted sequence are explicit, and ending a trace releases it. It never creates per-scroll production IPC.
 
-Document-work observation retains at most 32 content-free lifecycle records. For viewport work, `status` exposes `document_generation`, `input_generation`, `page_generation`, `width_epoch`, `geometry_revision`, `pending_page_request`, `reader_input_active`, `scroll_write_pending`, and `viewport_anchor`, plus bounded source-cache/index/search counters. `scroll_write_pending` acknowledges the one anchor-restoration scroll write until its native event arrives; it is not timer-driven settlement. [TESTING.md](TESTING.md) owns how observations, logs, and timing evidence may be used.
+Document-work observation retains at most 32 content-free lifecycle transition records. Incremental indexing progress updates the bounded status counters without consuming lifecycle-history entries. For viewport work, `status` exposes `document_generation`, `input_generation`, `page_generation`, `width_epoch`, `geometry_revision`, `pending_page_request`, `reader_input_active`, `scroll_write_pending`, and `viewport_anchor`, plus bounded source-cache/index/search counters. `scroll_write_pending` acknowledges the one anchor-restoration scroll write until its native event arrives; it is not timer-driven settlement. [TESTING.md](TESTING.md) owns how observations, logs, and timing evidence may be used.
 
 ## Implementation ownership
 
-| Path                            | Responsibility                                                                               |
-| ------------------------------- | -------------------------------------------------------------------------------------------- |
-| `src-tauri/src/shared_actions/` | Shared Rust product actions.                                                                 |
-| `src-tauri/src/agent_api/`      | Development protocol, request registry, Unix transport, test guard, and bounded observation. |
-| `web/src/shared-actions/`       | Shared frontend document, viewport, Find, and notice actions.                                |
-| `web/src/agent-api/`            | Development listeners and completion-reporting adapters.                                     |
-| `scripts/agent-api/`            | Typed client, contract test, scenarios, and diagnostic helpers. Never shipped.               |
+| Path                            | Responsibility                                                                                 |
+| ------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `src-tauri/src/shared_actions/` | Shared Rust product actions.                                                                   |
+| `src-tauri/src/agent_api/`      | Development protocol, request registry, Unix transport, test guard, and bounded observation.   |
+| `web/src/shared-actions/`       | Shared frontend document, viewport, Find, and notice actions.                                  |
+| `web/src/agent-api/`            | Development listeners and completion adapters, loaded only by the frontend development branch. |
+| `scripts/agent-api/`            | Typed client, contract test, scenarios, and diagnostic helpers. Never shipped.                 |
 
 Product state stays in its normal document, window, and frontend modules. Shared-action modules contain cross-boundary product actions; Agent API modules contain only protocol, adaptation, completion, guards, and bounded observation.
 

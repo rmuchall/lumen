@@ -270,9 +270,8 @@ impl LayoutPageDocument {
     }
 
     /// Returns the bounded source-ordered layout-page window around a reader
-    /// target. Once the background directory is complete this never uses the
-    /// legacy lead-in heuristic: every returned page is checked against the
-    /// canonical directory identity.
+    /// target. Once the background directory is complete, every returned page
+    /// is checked against the canonical directory identity.
     pub(crate) fn layout_page_window_for_source_offset(
         &mut self,
         source_offset: u64,

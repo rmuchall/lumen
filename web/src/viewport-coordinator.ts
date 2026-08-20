@@ -99,6 +99,7 @@ export type ViewportCoordinator = {
 };
 
 export function createViewportCoordinator(dependencies: ViewportCoordinatorDependencies): ViewportCoordinator {
+  const trace = import.meta.env.DEV ? dependencies.trace : undefined;
   let documentGeneration = 0;
   let inputGeneration = 0;
   let readerInputActive = false;
@@ -171,13 +172,14 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
       0,
       dependencies.viewerScrollElement.scrollHeight - dependencies.viewerScrollElement.clientHeight,
     );
-    dependencies.applyPages(pages, request.reason === "find");
+    const mountedPages = pointerInteractionId === null ? pages : [targetPage];
+    dependencies.applyPages(mountedPages, request.reason === "find");
     if (pointerInteractionId === null) {
       dependencies.viewport.measureMountedPages();
       commitMeasurements();
     }
     const scrollPositionAfterMount = dependencies.viewerScrollElement.scrollTop;
-    dependencies.trace(
+    trace?.(
       "page-window-applied",
       `target=${requestedSourceOffset} top_before=${scrollPositionBeforeMount.toFixed(1)} top_after=${scrollPositionAfterMount.toFixed(1)} maximum_before=${maximumScrollBeforeMount.toFixed(1)} pointer=${pointerInteractionId === null ? "none" : pointerInteractionId}`,
       correlationForRequest(request, pageGeneration),
@@ -186,20 +188,20 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
       const mountedScrollPosition =
         dependencies.viewport.scrollPositionForMountedSourceOffset(requestedSourceOffset) ??
         dependencies.viewport.scrollPositionForSourceOffset(requestedSourceOffset);
-      dependencies.trace(
+      trace?.(
         "mounted-page-position",
         `target=${requestedSourceOffset} position=${mountedScrollPosition.toFixed(1)} anchor=${viewportAnchor}`,
       );
       applySyntheticScrollPosition(mountedScrollPosition);
     } else {
       if (Math.abs(scrollPositionAfterMount - scrollPositionBeforeMount) > 1) {
-        dependencies.trace(
+        trace?.(
           "anchor-or-range-adjusted",
           `target=${requestedSourceOffset} current=${scrollPositionAfterMount.toFixed(1)} target=${scrollPositionBeforeMount.toFixed(1)}`,
         );
         applySyntheticScrollPosition(scrollPositionBeforeMount);
       }
-      dependencies.trace("mounted-page-preserved-pointer-position", `target=${requestedSourceOffset}`);
+      trace?.("mounted-page-preserved-pointer-position", `target=${requestedSourceOffset}`);
     }
     if (pointerInteractionId === null) {
       const {tabId, tabRevision} = dependencies.activeDocument();
@@ -212,12 +214,12 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
     }
     request.onCompletion?.("completed");
     commitMeasurements();
-    dependencies.trace(
+    trace?.(
       "page-work-resolved",
-      `target=${request.sourceOffset} pages=${pages.length} start=${targetPage.sourceStart} end=${targetPage.sourceEnd} reason=${request.reason}`,
+      `target=${request.sourceOffset} pages=${mountedPages.length} start=${targetPage.sourceStart} end=${targetPage.sourceEnd} reason=${request.reason}`,
       correlationForRequest(request, pageGeneration),
     );
-    for (const page of pages) {
+    for (const page of mountedPages) {
       dependencies.queueEnrichment(page);
     }
   }
@@ -228,7 +230,7 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
     const requestedPageGeneration = pageGeneration + 1;
     const {tabId: requestedTabId, tabRevision: requestedTabRevision} = dependencies.activeDocument();
     pageGeneration = requestedPageGeneration;
-    dependencies.trace(
+    trace?.(
       "page-work-requested",
       () => `target=${request.sourceOffset} force=${request.force} reason=${request.reason}`,
       correlationForRequest(request, requestedPageGeneration),
@@ -246,7 +248,7 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
         requestedTabId !== activeDocument.tabId ||
         requestedTabRevision !== activeDocument.tabRevision
       ) {
-        dependencies.trace(
+        trace?.(
           "page-work-resolved",
           `target=${request.sourceOffset} outcome=discarded reason=${request.reason}`,
           correlationForRequest(request, requestedPageGeneration),
@@ -255,7 +257,7 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
       }
       if (stale) {
         pendingSeek = null;
-        dependencies.trace(
+        trace?.(
           "page-work-resolved",
           `target=${request.sourceOffset} outcome=stale reason=${request.reason}`,
           correlationForRequest(request, requestedPageGeneration),
@@ -264,7 +266,7 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
         return;
       }
       if (pending) {
-        dependencies.trace(
+        trace?.(
           "page-work-resolved",
           `target=${request.sourceOffset} outcome=pending reason=${request.reason}`,
           correlationForRequest(request, requestedPageGeneration),
@@ -275,7 +277,7 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
         throw new Error("Lumen could not prepare a Markdown page window.");
       }
       const pages = snapshots.map(pageFromSnapshot);
-      dependencies.trace(
+      trace?.(
         "page-window-received",
         () =>
           `target=${request.sourceOffset} ranges=${pages
@@ -330,13 +332,13 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
       sourceOffset: target,
     };
     pendingSeek = request;
-    dependencies.trace("page-request-queued", `target=${target} force=${force} reason=${reason}`);
+    trace?.("page-request-queued", `target=${target} force=${force} reason=${reason}`);
     drainPendingSeek();
   }
 
   function beginInteraction(reason: string): void {
     readerInputActive = true;
-    dependencies.trace("reader-input-begin", `generation=${inputGeneration} reason=${reason}`);
+    trace?.("reader-input-begin", `generation=${inputGeneration} reason=${reason}`);
   }
 
   function settleInteraction(): void {
@@ -344,7 +346,7 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
       return;
     }
     readerInputActive = false;
-    dependencies.trace("reader-input-settled", `generation=${inputGeneration} anchor=${viewportAnchor}`);
+    trace?.("reader-input-settled", `generation=${inputGeneration} anchor=${viewportAnchor}`);
     dependencies.onInputSettled();
     if (!dependencies.viewport.containsSourceOffset(viewportAnchor)) {
       queueSeek(viewportAnchor, false, "scroll-settled");
@@ -359,7 +361,7 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
     }
     const observedSourceOffset = dependencies.viewport.sourceOffsetForScroll();
     if (!dependencies.viewport.containsSourceOffset(observedSourceOffset)) {
-      dependencies.trace(
+      trace?.(
         "anchor-or-range-adjusted",
         `previous=${viewportAnchor} observed=${observedSourceOffset} outcome=reload-page`,
       );
@@ -368,7 +370,7 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
       return;
     }
     if (Math.abs(observedSourceOffset - viewportAnchor) > 64) {
-      dependencies.trace("anchor-or-range-adjusted", `previous=${viewportAnchor} observed=${observedSourceOffset}`);
+      trace?.("anchor-or-range-adjusted", `previous=${viewportAnchor} observed=${observedSourceOffset}`);
       viewportAnchor = observedSourceOffset;
     }
     dependencies.onStable();
@@ -395,13 +397,13 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
     const measurementCommit = dependencies.viewport.commitMeasurements();
     measurementCommitActive = false;
     if (measurementCommit.restoredScrollPosition !== null) {
-      dependencies.trace(
+      trace?.(
         "anchor-or-range-adjusted",
         `current=${dependencies.viewerScrollElement.scrollTop.toFixed(1)} target=${measurementCommit.restoredScrollPosition.toFixed(1)}`,
       );
       applySyntheticScrollPosition(measurementCommit.restoredScrollPosition);
     }
-    dependencies.trace(
+    trace?.(
       "geometry-committed",
       `input_generation=${inputGeneration} anchor=${viewportAnchor} changed=${measurementCommit.changed}`,
     );
@@ -410,7 +412,7 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
 
   function handleNativeScroll(): number | null {
     if (restoringPosition) {
-      dependencies.trace("scroll-ignored-restoring-position", "");
+      trace?.("scroll-ignored-restoring-position", "");
       return null;
     }
     beginInteraction("native-scroll");
@@ -419,7 +421,7 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
     if (!dependencies.viewport.containsSourceOffset(sourceOffset)) {
       queueSeek(sourceOffset);
     }
-    dependencies.trace(
+    trace?.(
       "scroll-dispatched",
       () => `source=${sourceOffset} contained=${dependencies.viewport.containsSourceOffset(sourceOffset)}`,
     );
@@ -428,7 +430,7 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
 
   function completeNativeScroll(): number | null {
     const sourceOffset = handleNativeScroll();
-    dependencies.trace("native-scroll", `source=${sourceOffset ?? 0}`);
+    trace?.("native-scroll", `source=${sourceOffset ?? 0}`);
     pendingSharedScrollCompletion?.(sourceOffset === null ? "stale" : "completed");
     pendingSharedScrollCompletion = null;
     return sourceOffset;
@@ -446,7 +448,7 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
     heldNativeScrollPending = false;
     heldNativeScrollCount = 0;
     if (inputCount > 1 || reason === "release") {
-      dependencies.trace(`native-scroll-frame-${reason}`, `anchor=${viewportAnchor} inputs=${inputCount}`);
+      trace?.(`native-scroll-frame-${reason}`, `anchor=${viewportAnchor} inputs=${inputCount}`);
     }
     completeNativeScroll();
   }
@@ -483,10 +485,7 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
         pendingAgentNativeScrollPosition !== null &&
         Math.abs(dependencies.viewerScrollElement.scrollTop - pendingAgentNativeScrollPosition) <= 1
       ) {
-        dependencies.trace(
-          "agent-native-scroll-duplicate",
-          `top=${dependencies.viewerScrollElement.scrollTop.toFixed(1)}`,
-        );
+        trace?.("agent-native-scroll-duplicate", `top=${dependencies.viewerScrollElement.scrollTop.toFixed(1)}`);
         pendingAgentNativeScrollPosition = null;
         return null;
       }
@@ -497,7 +496,7 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
       Math.abs(dependencies.viewerScrollElement.scrollTop - pendingScrollWritePosition) <= 1
     ) {
       pendingScrollWritePosition = null;
-      dependencies.trace(
+      trace?.(
         "scroll-write-observed",
         `top=${dependencies.viewerScrollElement.scrollTop.toFixed(1)} anchor=${viewportAnchor}`,
       );
@@ -507,7 +506,7 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
       return null;
     }
     pendingScrollWritePosition = null;
-    dependencies.trace(
+    trace?.(
       "native-scroll-received",
       `top=${dependencies.viewerScrollElement.scrollTop.toFixed(1)} anchor=${viewportAnchor}`,
     );
@@ -531,7 +530,7 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
       dependencies.viewerScrollElement.scrollHeight - dependencies.viewerScrollElement.clientHeight,
     );
     const targetPosition = Math.max(0, Math.min(position, maximumScroll));
-    dependencies.trace(
+    trace?.(
       "scroll-write-accepted",
       `requested=${position.toFixed(1)} target=${targetPosition.toFixed(1)} maximum=${maximumScroll.toFixed(1)} generation=${inputGeneration}`,
     );
@@ -553,7 +552,7 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
     const anchor = dependencies.viewport.sourceOffsetForScroll();
     dependencies.viewport.beginWidthEpoch();
     commitMeasurements();
-    dependencies.trace("width-epoch-begin", `anchor=${anchor} ${dependencies.viewport.agentObservation()}`);
+    trace?.("width-epoch-begin", `anchor=${anchor} ${dependencies.viewport.agentObservation()}`);
   }
 
   function beginPointerInteraction(pointerId: number): void {
@@ -563,7 +562,7 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
     pointerInteractionId = pointerId;
     dependencies.viewport.beginNativeRangeHold();
     beginInteraction("pointer");
-    dependencies.trace("pointer-interaction-begin", `pointer=${pointerId}`);
+    trace?.("pointer-interaction-begin", `pointer=${pointerId}`);
   }
 
   function endPointerInteraction(pointerId: number): void {
@@ -572,7 +571,7 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
     }
     flushHeldNativeScroll("release");
     pointerInteractionId = null;
-    dependencies.trace("pointer-interaction-end", `pointer=${pointerId} anchor=${viewportAnchor}`);
+    trace?.("pointer-interaction-end", `pointer=${pointerId} anchor=${viewportAnchor}`);
     dependencies.viewport.endNativeRangeHold();
     dependencies.viewport.measureMountedPages();
     settleInteraction();
@@ -611,10 +610,7 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
       return;
     }
     pageWakePending = true;
-    dependencies.trace(
-      "page-request-ready",
-      `target=${pendingSeek.sourceOffset} start=${sourceStart} end=${sourceEnd}`,
-    );
+    trace?.("page-request-ready", `target=${pendingSeek.sourceOffset} start=${sourceStart} end=${sourceEnd}`);
     drainPendingSeek();
   }
 
@@ -654,7 +650,7 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
     scrollToPosition,
     settleAfterScroll: () => {
       if (pointerInteractionId !== null) {
-        dependencies.trace("scrollend-deferred-for-pointer", `pointer=${pointerInteractionId}`);
+        trace?.("scrollend-deferred-for-pointer", `pointer=${pointerInteractionId}`);
         return;
       }
       settleInteraction();

@@ -26,11 +26,6 @@ mod shared_actions;
 mod viewer_api;
 mod window_state;
 
-// VV.0a is deliberately test-only: feasibility evidence must not add a second
-// production viewport path before the destructive migration begins.
-#[cfg(test)]
-mod layout_page_spike;
-
 use configuration::{ConfigurationState, Theme, configuration_path, watch_configuration};
 use document::DocumentState;
 use instance::{InstanceClaim, InstanceState};
