@@ -1,0 +1,40 @@
+{
+  "name": "lumen",
+  "version": "0.1.37",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite",
+    "generate:performance-fixtures": "node scripts/testing/generate-performance-fixtures.ts",
+    "test:clean": "node scripts/testing/clean-environment.ts",
+    "test:page-geometry": "node scripts/testing/page-geometry.test.ts",
+    "test": "npm run test:critical && npm run test:regular",
+    "test:case": "node scripts/testing/run-suite.ts --case",
+    "test:critical": "node scripts/testing/run-suite.ts --tier critical",
+    "test:agent-api-layout-page-viewer": "node scripts/agent-api/scenarios/layout-page-viewer.ts",
+    "test:agent-api-contract": "node scripts/agent-api/contract.test.ts",
+    "test:regular": "node scripts/testing/run-suite.ts --tier regular",
+    "test:stress": "node scripts/testing/run-suite.ts --tier stress",
+    "test:performance": "node scripts/testing/run-suite.ts --performance",
+    "test:performance-contract": "node scripts/testing/performance-metrics.test.ts",
+    "test:production-artifact": "npm run build && cargo build --manifest-path src-tauri/Cargo.toml --release && node scripts/release/production-artifact.test.ts",
+    "format": "oxfmt --config .oxfmtrc.json --write .",
+    "lint": "oxlint --config .oxlintrc.json --type-aware . && oxfmt --config .oxfmtrc.json --check .",
+    "tauri": "tauri",
+    "types": "tsc --noEmit",
+    "verify": "npm run lint && npm run types && cargo fmt --check --manifest-path src-tauri/Cargo.toml && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml && npm test"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.11.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4",
+    "@types/node": "24.10.4",
+    "oxfmt": "0.63.0",
+    "oxlint": "1.78.0",
+    "oxlint-tsgolint": "7.0.2001",
+    "typescript": "7.0.2",
+    "vite": "8.2.1"
+  }
+}

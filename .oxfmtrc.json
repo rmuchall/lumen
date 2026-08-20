@@ -1,0 +1,10 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "semi": true,
+  "singleQuote": false,
+  "jsxSingleQuote": false,
+  "bracketSpacing": false,
+  "printWidth": 120,
+  "trailingComma": "all",
+  "ignorePatterns": ["**/dist/**", "**/node_modules/**", "**/target/**", "**/src-tauri/gen/**"]
+}

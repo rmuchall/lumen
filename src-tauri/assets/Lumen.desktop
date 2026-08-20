@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Lumen
+Comment=A fast, lightweight, offline Markdown viewer
+Exec=lumen %F
+Icon=lumen
+Terminal=false
+StartupWMClass=lumen
+MimeType=text/markdown;
+Categories=Office;Utility;
