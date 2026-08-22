@@ -38,6 +38,7 @@ struct OpenDocument {
     pending_anchor: Option<String>,
     index_requested_revision: Option<u64>,
     find_query: Option<String>,
+    external_change_generation: u64,
 }
 
 fn complete_document_work(app: &tauri::AppHandle, outcome: DocumentWorkOutcome) {
@@ -282,6 +283,7 @@ impl DocumentState {
                 pending_anchor: None,
                 index_requested_revision: None,
                 find_query: None,
+                external_change_generation: 0,
             });
             session.active_tab_id = Some(tab_id);
             session.watch_generation += 1;
@@ -360,6 +362,7 @@ impl DocumentState {
             pending_anchor: None,
             index_requested_revision: None,
             find_query: None,
+            external_change_generation: 0,
         });
         session.active_tab_id = Some(tab_id);
         session.watch_generation += 1;
@@ -420,6 +423,7 @@ impl DocumentState {
         tab.frozen_error = None;
         tab.pending_anchor = None;
         tab.index_requested_revision = None;
+        tab.external_change_generation = 0;
         session.watch_generation += 1;
         session.watch_ready_generation = None;
         drop(session);
@@ -605,6 +609,20 @@ impl DocumentState {
             .map_or(0, |tab| tab.viewer.estimated_layout_page_count())
     }
 
+    pub(crate) fn active_index_is_complete(&self) -> bool {
+        let Ok(session) = self.session.lock() else {
+            return false;
+        };
+        let Some(active_tab_id) = session.active_tab_id else {
+            return false;
+        };
+        session
+            .tabs
+            .iter()
+            .find(|tab| tab.id == active_tab_id)
+            .is_some_and(|tab| tab.viewer.index_is_complete())
+    }
+
     pub(crate) fn active_viewer_position(&self) -> (f64, u64) {
         let Ok(session) = self.session.lock() else {
             return (0.0, 0);
@@ -618,6 +636,20 @@ impl DocumentState {
             .find(|tab| tab.id == active_tab_id)
             .map(|tab| (tab.scroll_position, tab.source_offset))
             .unwrap_or((0.0, 0))
+    }
+
+    pub(crate) fn active_external_change_generation(&self) -> u64 {
+        let Ok(session) = self.session.lock() else {
+            return 0;
+        };
+        let Some(active_tab_id) = session.active_tab_id else {
+            return 0;
+        };
+        session
+            .tabs
+            .iter()
+            .find(|tab| tab.id == active_tab_id)
+            .map_or(0, |tab| tab.external_change_generation)
     }
 
     pub(crate) fn layout_page_window_for_active_viewer(
@@ -907,6 +939,8 @@ impl DocumentState {
         for tab in &mut session.tabs {
             if tab.viewer.path() == path {
                 tab.stale = true;
+                tab.external_change_generation =
+                    tab.external_change_generation.saturating_add(1).max(1);
                 tab.pending_anchor = None;
                 tab.index_requested_revision = None;
                 active_changed |= Some(tab.id) == active_tab_id;
@@ -935,6 +969,24 @@ impl DocumentState {
         }
         drop(session);
         self.cancel_document_work();
+    }
+
+    pub(crate) fn acknowledge_external_reload(
+        &self,
+        tab_id: u64,
+        tab_revision: u64,
+        external_change_generation: u64,
+    ) -> Result<bool, String> {
+        let mut session = self
+            .session
+            .lock()
+            .map_err(|_| "the document session is unavailable".to_owned())?;
+        let tab = active_viewer_tab(&mut session, tab_id, tab_revision)?;
+        if tab.stale || tab.external_change_generation != external_change_generation {
+            return Ok(false);
+        }
+        tab.external_change_generation = 0;
+        Ok(true)
     }
 
     pub(crate) fn first_page_displayed(

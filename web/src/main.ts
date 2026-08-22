@@ -6,7 +6,7 @@ import type {AgentEventLifecycle} from "./agent-api/listeners";
 import {installCodeCopyControls} from "./code-copy";
 import {createDocumentBar} from "./document-bar";
 import {createFindController, type RustFindNavigation, type RustFindProgress} from "./find";
-import {createRecoverableNoticeController} from "./shared-actions/notices";
+import {createNoticeController} from "./shared-actions/notices";
 import type {ScrollDiagnostics} from "./scroll-diagnostics";
 import {createDocumentActions} from "./shared-actions/documents";
 import {createFindActions} from "./shared-actions/find";
@@ -21,7 +21,12 @@ import {
   installLocalImageSources,
   replaceTaskCheckboxes,
 } from "./viewer-dom";
-import {createLayoutPageViewport, type LayoutPageDirectoryEntry, type ViewerPage} from "./layout-page-viewport";
+import {
+  createLayoutPageViewport,
+  type LayoutPageDirectoryEntry,
+  type ReloadViewportAnchor,
+  type ViewerPage,
+} from "./layout-page-viewport";
 import type {PageGeometrySnapshot} from "./page-geometry";
 import {
   createViewportCoordinator,
@@ -63,7 +68,7 @@ async function installTestRunBanner(): Promise<void> {
 }
 const statusBarElement = document.createElement("footer");
 const linkStatusElement = document.createElement("span");
-const recoverableNotices = createRecoverableNoticeController();
+const recoverableNotices = createNoticeController();
 type PendingFindScan = {
   query: string;
   tabId: number;
@@ -81,6 +86,8 @@ let pendingFindNavigation: PendingFindNavigation | null = null;
 let activeViewerTabId = 0;
 let activeViewerTabRevision = 0;
 const tabLayoutSnapshots = new Map<string, PageGeometrySnapshot>();
+let pendingPageDisplayReset = false;
+let pendingPageLayoutSnapshot: PageGeometrySnapshot | null = null;
 const findController = createFindController(
   appElement,
   markdownElement,
@@ -209,7 +216,9 @@ const documentActions = createDocumentActions({
     scrollPosition: viewerScrollElement.scrollTop,
     sourceOffset: viewportCoordinator?.inputAnchor() ?? 0,
   }),
-  refreshSession: refreshDocumentSession,
+  refreshSession: async () => {
+    await refreshDocumentSession();
+  },
   showError: (message) => recoverableNotices.show("document", "error", message),
 });
 const viewportActions = createViewportActions({
@@ -230,6 +239,14 @@ type PendingLayoutPageDirectory = {
   tabRevision: number;
 };
 let pendingLayoutPageDirectory: PendingLayoutPageDirectory | null = null;
+type PendingReloadAdoption = {
+  anchor: ReloadViewportAnchor;
+  documentGeneration: number;
+  resolve: (adopted: boolean) => void;
+  tabId: number;
+  tabRevision: number;
+};
+let pendingReloadAdoption: PendingReloadAdoption | null = null;
 
 type ViewerSnapshot = readonly [
   tabs: DocumentTab[],
@@ -245,7 +262,21 @@ type ViewerSnapshot = readonly [
   pageId: string,
   tabId: number,
   tabRevision: number,
+  externalChangeGeneration: number,
+  indexComplete: boolean,
 ];
+
+type ReloadAnchor = ReloadViewportAnchor & {
+  tabId: number;
+  tabRevision: number;
+};
+
+type RefreshResult = {
+  displayed: boolean;
+  externalChangeGeneration: number;
+  tabId: number;
+  tabRevision: number;
+};
 
 let agentEvents: AgentEventLifecycle | null = null;
 const queuedPageEnrichments = new Set<string>();
@@ -254,7 +285,13 @@ const nativeContextMenuSelection = createNativeContextMenuSelectionPreserver();
 
 viewportCoordinator = createViewportCoordinator({
   activeDocument: () => ({tabId: activeViewerTabId, tabRevision: activeViewerTabRevision}),
-  applyPages: (pages, preferViewportFindMatch) => displayMarkdown(pages, 0, false, preferViewportFindMatch),
+  applyPages: (pages, preferViewportFindMatch) => {
+    const resetLayout = pendingPageDisplayReset;
+    const layoutSnapshot = pendingPageLayoutSnapshot;
+    pendingPageDisplayReset = false;
+    pendingPageLayoutSnapshot = null;
+    displayMarkdown(pages, 0, resetLayout, preferViewportFindMatch, layoutSnapshot);
+  },
   hasTerminalLayout,
   onInputSettled: applyPendingLayoutPageDirectory,
   onError: (message) => recoverableNotices.show("document", "error", message),
@@ -523,6 +560,8 @@ async function loadLayoutPageDirectory(tabId: number, tabRevision: number): Prom
     applyLayoutPageDirectory(pendingDirectory);
   } catch (error: unknown) {
     agentEvents?.layoutPageDirectoryFailed();
+    pendingReloadAdoption?.resolve(false);
+    pendingReloadAdoption = null;
     recoverableNotices.show("document", "error", `Unable to load the Markdown page directory: ${errorMessage(error)}`);
   }
 }
@@ -538,14 +577,31 @@ function applyLayoutPageDirectory(pendingDirectory: PendingLayoutPageDirectory):
   pendingLayoutPageDirectory = null;
   // The provisional source-progress geometry and canonical page geometry use
   // different height models. Carry the logical anchor across that replacement.
-  const sourceAnchor = viewportCoordinator?.inputAnchor() ?? layoutPageViewport.sourceOffsetForScroll();
+  const reloadAdoption = pendingReloadAdoption;
+  const sourceAnchor =
+    reloadAdoption !== null &&
+    reloadAdoption.documentGeneration === pendingDirectory.documentGeneration &&
+    reloadAdoption.tabId === pendingDirectory.tabId &&
+    reloadAdoption.tabRevision === pendingDirectory.tabRevision
+      ? reloadAdoption.anchor.sourceOffset
+      : (viewportCoordinator?.inputAnchor() ?? layoutPageViewport.sourceOffsetForScroll());
   layoutPageViewport.setDirectory(pendingDirectory.directory);
   viewportCoordinator?.setAnchor(sourceAnchor);
-  viewportCoordinator?.applySyntheticScrollPosition(layoutPageViewport.scrollPositionForSourceOffset(sourceAnchor));
+  const restoredReloadPosition = reloadAdoption?.anchor
+    ? layoutPageViewport.scrollPositionForReloadAnchor(reloadAdoption.anchor)
+    : null;
+  viewportCoordinator?.applySyntheticScrollPosition(
+    restoredReloadPosition ?? layoutPageViewport.scrollPositionForSourceOffset(sourceAnchor),
+  );
   layoutPageDirectoryReady = true;
   trace?.("layout-directory-applied", `tab=${pendingDirectory.tabId} revision=${pendingDirectory.tabRevision}`);
   agentEvents?.layoutPageDirectoryReady();
   viewportCoordinator?.directoryBecameReady();
+  if (reloadAdoption !== null && reloadAdoption === pendingReloadAdoption) {
+    pendingReloadAdoption = null;
+    viewportCoordinator?.restorePositionInProgress(false);
+    reloadAdoption.resolve(true);
+  }
 }
 
 function applyPendingLayoutPageDirectory(): void {
@@ -574,33 +630,126 @@ function discardClosedTabLayouts(tabs: readonly DocumentTab[], tabId: number, ta
   }
 }
 
-async function reloadOpenedMarkdown(preserveCommittedAction = false): Promise<void> {
-  if (activeViewerTabId !== 0) {
+function captureReloadAnchor(): ReloadAnchor | null {
+  if (activeViewerTabId === 0) {
+    return null;
+  }
+  const sourceOffset = viewportCoordinator?.inputAnchor() ?? layoutPageViewport.sourceOffsetForScroll();
+  return {
+    ...layoutPageViewport.captureReloadAnchor(sourceOffset),
+    tabId: activeViewerTabId,
+    tabRevision: activeViewerTabRevision,
+  };
+}
+
+async function acknowledgeExternalReload(result: RefreshResult): Promise<boolean> {
+  if (!result.displayed || result.externalChangeGeneration === 0) {
+    return true;
+  }
+  const acknowledged = await invoke<boolean>("acknowledge_external_reload", {
+    externalChangeGeneration: result.externalChangeGeneration,
+    tabId: result.tabId,
+    tabRevision: result.tabRevision,
+  });
+  if (acknowledged && activeViewerTabId === result.tabId && activeViewerTabRevision === result.tabRevision) {
+    recoverableNotices.showDocumentReloaded();
+  }
+  return acknowledged;
+}
+
+async function reloadOpenedMarkdown(): Promise<RefreshResult> {
+  const anchor = captureReloadAnchor();
+  if (anchor !== null) {
     await invoke<boolean>("save_document_viewer_position", {
-      sourceOffset: layoutPageViewport.sourceOffsetForScroll(),
+      sourceOffset: anchor.sourceOffset,
       scrollPosition: viewerScrollElement.scrollTop,
-      tabId: activeViewerTabId,
-      tabRevision: activeViewerTabRevision,
+      tabId: anchor.tabId,
+      tabRevision: anchor.tabRevision,
     });
   }
-  await refreshDocumentSession(preserveCommittedAction);
+  const result = await refreshDocumentSession(true, anchor);
+  return result;
 }
 
-async function handleViewerReload(): Promise<void> {
-  agentEvents?.documentReloading();
-  await reloadOpenedMarkdown(true);
-  agentEvents?.documentReloaded();
+let reloadActive = false;
+let reloadPending = false;
+let pendingReloadWatched = false;
+
+function requestReload(watched: boolean): void {
+  if (reloadActive) {
+    reloadPending = true;
+    pendingReloadWatched ||= watched;
+    return;
+  }
+  reloadActive = true;
+  void runReloads(watched);
 }
 
-async function handleWatchedMarkdownChange(): Promise<void> {
-  agentEvents?.beginWatchedMarkdownChange();
-  await reloadOpenedMarkdown(true);
-  agentEvents?.watchedMarkdownChanged();
+async function runReloads(initialWatched: boolean): Promise<void> {
+  let watched = initialWatched;
+  let watchedLifecycleStarted = false;
+  let explicitLifecycleStarted = false;
+  function beginLifecycle(): void {
+    if (watched && !watchedLifecycleStarted) {
+      watchedLifecycleStarted = true;
+      agentEvents?.beginWatchedMarkdownChange();
+    } else if (!watched && !explicitLifecycleStarted) {
+      explicitLifecycleStarted = true;
+      agentEvents?.documentReloading();
+    }
+  }
+  function completeLifecycles(): void {
+    if (watchedLifecycleStarted) {
+      agentEvents?.watchedMarkdownChanged();
+    }
+    if (explicitLifecycleStarted) {
+      agentEvents?.documentReloaded();
+    }
+  }
+  try {
+    while (true) {
+      beginLifecycle();
+      const result = await reloadOpenedMarkdown();
+      if (!result.displayed) {
+        completeLifecycles();
+        return;
+      }
+      if (!reloadPending) {
+        const acknowledged = await acknowledgeExternalReload(result);
+        if (!acknowledged) {
+          reloadPending = true;
+          pendingReloadWatched = true;
+        }
+      }
+      if (!reloadPending) {
+        completeLifecycles();
+        return;
+      }
+      watched = pendingReloadWatched;
+      reloadPending = false;
+      pendingReloadWatched = false;
+    }
+  } catch (error: unknown) {
+    recoverableNotices.show("document", "error", `Unable to refresh Markdown document: ${errorMessage(error)}`);
+  } finally {
+    reloadActive = false;
+    if (reloadPending) {
+      const watchedIntent = pendingReloadWatched;
+      reloadPending = false;
+      pendingReloadWatched = false;
+      requestReload(watchedIntent);
+    }
+  }
 }
 
-async function refreshDocumentSession(preserveCommittedAction = false): Promise<void> {
+async function refreshDocumentSession(
+  preserveCommittedAction = false,
+  reloadAnchor: ReloadAnchor | null = null,
+): Promise<RefreshResult> {
   layoutPageDirectoryReady = false;
   pendingLayoutPageDirectory = null;
+  pendingReloadAdoption?.resolve(false);
+  pendingReloadAdoption = null;
   captureActiveTabLayout();
   const requestedGeneration = viewportCoordinator?.beginDocumentRevision() ?? 0;
   agentEvents?.cancel(preserveCommittedAction);
@@ -621,9 +770,11 @@ async function refreshDocumentSession(preserveCommittedAction = false): Promise<
       pageId,
       tabId,
       tabRevision,
+      externalChangeGeneration,
+      indexComplete,
     ] = await invoke<ViewerSnapshot>("viewer_snapshot");
     if (requestedGeneration !== viewportCoordinator?.documentGeneration()) {
-      return;
+      return {displayed: false, externalChangeGeneration: 0, tabId: 0, tabRevision: 0};
     }
     tabController.render(tabs);
     if (tabs.length === 0) {
@@ -633,15 +784,96 @@ async function refreshDocumentSession(preserveCommittedAction = false): Promise<
       documentBar.setPath(null);
       showEmptyViewer();
       findController.refresh();
-      return;
+      return {displayed: true, externalChangeGeneration: 0, tabId: 0, tabRevision: 0};
     }
     discardClosedTabLayouts(tabs, tabId, tabRevision);
     documentBar.setPath(documentPath);
     activeViewerTabId = tabId;
     activeViewerTabRevision = tabRevision;
+    if (
+      reloadAnchor !== null &&
+      reloadAnchor.tabId === tabId &&
+      reloadAnchor.tabRevision === tabRevision &&
+      externalChangeGeneration === 0
+    ) {
+      if (indexComplete) {
+        await loadLayoutPageDirectory(tabId, tabRevision);
+      }
+      return {displayed: true, externalChangeGeneration, tabId, tabRevision};
+    }
+    const page = {html: renderedMarkdown, pageId, sourceStart, sourceEnd, sourceLength};
+    if (reloadAnchor !== null && reloadAnchor.tabId === tabId) {
+      if (recoverableError !== null) {
+        recoverableNotices.show("document", "error", `Unable to refresh Markdown document: ${recoverableError}`);
+        return {displayed: false, externalChangeGeneration, tabId, tabRevision};
+      }
+      const restoredAnchor: ReloadViewportAnchor = {
+        sourceOffset: Math.min(reloadAnchor.sourceOffset, Math.max(0, sourceLength - 1)),
+        viewportOffset: reloadAnchor.viewportOffset,
+      };
+      viewportCoordinator?.restorePositionInProgress(true);
+      let resolveDirectoryAdoption = (_adopted: boolean): void => undefined;
+      const directoryAdoption = new Promise<boolean>((resolve) => {
+        resolveDirectoryAdoption = resolve;
+      });
+      const reloadAdoption: PendingReloadAdoption = {
+        anchor: restoredAnchor,
+        documentGeneration: requestedGeneration,
+        resolve: resolveDirectoryAdoption,
+        tabId,
+        tabRevision,
+      };
+      pendingReloadAdoption = reloadAdoption;
+      const targetInInitialPage =
+        sourceLength === 0 || (sourceStart <= restoredAnchor.sourceOffset && restoredAnchor.sourceOffset < sourceEnd);
+      const layoutSnapshot = tabLayoutSnapshots.get(tabLayoutKey(reloadAnchor.tabId, reloadAnchor.tabRevision)) ?? null;
+      if (targetInInitialPage) {
+        displayMarkdown([page], estimatedPageCount, true, false, layoutSnapshot);
+      } else {
+        pendingPageDisplayReset = true;
+        pendingPageLayoutSnapshot = layoutSnapshot;
+        const outcome = await new Promise<"completed" | "failed" | "stale" | "superseded">((resolve) => {
+          viewportCoordinator?.queueSeek(restoredAnchor.sourceOffset, true, "reload-restore", resolve);
+        });
+        if (outcome !== "completed" || requestedGeneration !== viewportCoordinator?.documentGeneration()) {
+          pendingPageDisplayReset = false;
+          pendingPageLayoutSnapshot = null;
+          reloadAdoption.resolve(false);
+          if (pendingReloadAdoption === reloadAdoption) {
+            pendingReloadAdoption = null;
+          }
+          viewportCoordinator?.restorePositionInProgress(false);
+          return {displayed: false, externalChangeGeneration, tabId, tabRevision};
+        }
+      }
+      const restoredScrollPosition = layoutPageViewport.scrollPositionForReloadAnchor(restoredAnchor);
+      viewportCoordinator?.setAnchor(restoredAnchor.sourceOffset);
+      if (restoredScrollPosition !== null) {
+        viewportCoordinator?.applySyntheticScrollPosition(restoredScrollPosition);
+      }
+      if (sourceLength === 0 && pendingReloadAdoption === reloadAdoption) {
+        pendingReloadAdoption = null;
+        viewportCoordinator?.restorePositionInProgress(false);
+        reloadAdoption.resolve(true);
+      } else if (indexComplete) {
+        await loadLayoutPageDirectory(tabId, tabRevision);
+      }
+      const adopted = await directoryAdoption;
+      if (!adopted || requestedGeneration !== viewportCoordinator?.documentGeneration()) {
+        viewportCoordinator?.restorePositionInProgress(false);
+        return {displayed: false, externalChangeGeneration, tabId, tabRevision};
+      }
+      await invoke<boolean>("save_document_viewer_position", {
+        sourceOffset: restoredAnchor.sourceOffset,
+        scrollPosition: viewerScrollElement.scrollTop,
+        tabId,
+        tabRevision,
+      });
+      findController.refresh();
+      return {displayed: true, externalChangeGeneration, tabId, tabRevision};
+    }
     viewportCoordinator?.restorePositionInProgress(true);
     viewportCoordinator?.applySyntheticScrollPosition(0);
-    const page = {html: renderedMarkdown, pageId, sourceStart, sourceEnd, sourceLength};
     displayMarkdown(
       [page],
       estimatedPageCount,
@@ -683,6 +915,9 @@ async function refreshDocumentSession(preserveCommittedAction = false): Promise<
     } else {
       viewportCoordinator?.restorePositionInProgress(false);
     }
+    const result = {displayed: recoverableError === null, externalChangeGeneration, tabId, tabRevision};
+    await acknowledgeExternalReload(result);
+    return result;
   } catch (error: unknown) {
     const message = errorMessage(error);
     if (hasDisplayedDocument()) {
@@ -690,6 +925,7 @@ async function refreshDocumentSession(preserveCommittedAction = false): Promise<
     } else {
       showBlockingError(`Unable to display Markdown document: ${message}`);
     }
+    return {displayed: false, externalChangeGeneration: 0, tabId: 0, tabRevision: 0};
   }
 }
 
@@ -802,8 +1038,8 @@ async function restartLumen(): Promise<void> {
 
 async function installViewerEvents(): Promise<void> {
   await Promise.all([
-    listen("markdown-file-changed", () => void handleWatchedMarkdownChange()),
-    listen("viewer-reload", () => void handleViewerReload()),
+    listen("markdown-file-changed", () => requestReload(true)),
+    listen("viewer-reload", () => requestReload(false)),
     listen("viewer-find", findActions.show),
     listen("viewer-document-opened", () => void handleViewerDocumentOpened()),
     listen<readonly [number, number, number | null]>("viewer-index-complete", (event) => {

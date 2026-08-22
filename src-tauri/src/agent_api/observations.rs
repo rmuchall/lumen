@@ -425,6 +425,7 @@ pub(crate) fn report_agent_observation_ui_state(ui_state: String) {
         return;
     };
     state.ui_state = ui_state;
+    state.ui_state_sequence = state.ui_state_sequence.saturating_add(1);
 }
 
 #[cfg(debug_assertions)]

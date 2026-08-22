@@ -369,10 +369,6 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
       queueSeek(observedSourceOffset, false, "reconciled-scroll-position");
       return;
     }
-    if (Math.abs(observedSourceOffset - viewportAnchor) > 64) {
-      trace?.("anchor-or-range-adjusted", `previous=${viewportAnchor} observed=${observedSourceOffset}`);
-      viewportAnchor = observedSourceOffset;
-    }
     dependencies.onStable();
   }
 
@@ -471,12 +467,7 @@ export function createViewportCoordinator(dependencies: ViewportCoordinatorDepen
       return;
     }
     const {tabId, tabRevision} = dependencies.activeDocument();
-    void dependencies.persistPosition(
-      dependencies.viewport.sourceOffsetForScroll(),
-      dependencies.viewerScrollElement.scrollTop,
-      tabId,
-      tabRevision,
-    );
+    void dependencies.persistPosition(viewportAnchor, dependencies.viewerScrollElement.scrollTop, tabId, tabRevision);
   }
 
   function handleScrollEvent(event?: Event): number | null {

@@ -18,6 +18,8 @@ type ViewerSnapshot = (
     String,
     u64,
     u64,
+    u64,
+    bool,
 );
 
 type PageSnapshot = (String, u64, u64, u64, String, bool);
@@ -46,6 +48,8 @@ pub(crate) fn viewer_snapshot(
             String::new(),
             0,
             0,
+            0,
+            true,
         ));
     }
     let active_path = document_state.active_path_display();
@@ -54,6 +58,7 @@ pub(crate) fn viewer_snapshot(
             run_log.event("document-read-failed");
         })?;
     let estimated_page_count = document_state.active_estimated_layout_page_count();
+    let index_complete = document_state.active_index_is_complete();
     crate::agent_api::record_layout_page_viewport(
         page.source_start,
         page.source_end,
@@ -61,6 +66,7 @@ pub(crate) fn viewer_snapshot(
     );
     record_active_viewer_observations(&document_state);
     let (saved_scroll_position, saved_source_offset) = document_state.active_viewer_position();
+    let external_change_generation = document_state.active_external_change_generation();
     Ok((
         tabs,
         active_path,
@@ -75,7 +81,19 @@ pub(crate) fn viewer_snapshot(
         page.page_id_wire_value(),
         tab_id,
         tab_revision,
+        external_change_generation,
+        index_complete,
     ))
+}
+
+#[tauri::command]
+pub(crate) fn acknowledge_external_reload(
+    tab_id: u64,
+    tab_revision: u64,
+    external_change_generation: u64,
+    document_state: tauri::State<'_, DocumentState>,
+) -> Result<bool, String> {
+    document_state.acknowledge_external_reload(tab_id, tab_revision, external_change_generation)
 }
 
 #[tauri::command]

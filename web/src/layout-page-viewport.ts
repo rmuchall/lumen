@@ -19,10 +19,16 @@ export type MeasurementCommit = {
   restoredScrollPosition: number | null;
 };
 
+export type ReloadViewportAnchor = {
+  sourceOffset: number;
+  viewportOffset: number;
+};
+
 export type LayoutPageViewport = {
   beginWidthEpoch(): void;
   beginNativeRangeHold(): void;
   captureLayout(): PageGeometrySnapshot;
+  captureReloadAnchor(sourceOffset: number): ReloadViewportAnchor;
   clear(): void;
   commitMeasurements(): MeasurementCommit;
   containsSourceOffset(sourceOffset: number): boolean;
@@ -44,6 +50,7 @@ export type LayoutPageViewport = {
     snapshot: PageGeometrySnapshot | null,
   ): void;
   scrollPositionForMountedSourceOffset(sourceOffset: number): number | null;
+  scrollPositionForReloadAnchor(anchor: ReloadViewportAnchor): number | null;
   scrollPositionForSourceOffset(sourceOffset: number): number;
   sourceOffsetForScrollPosition(position: number): number;
   setDirectory(directory: readonly LayoutPageDirectoryEntry[]): void;
@@ -145,6 +152,47 @@ export function createLayoutPageViewport(
       return null;
     }
     return {pageId: pageElement.dataset.pageId, viewportOffset: pageElement.getBoundingClientRect().top - viewportTop};
+  }
+
+  function pageElementForSourceOffset(sourceOffset: number): HTMLElement | null {
+    const page = pages.find((candidate) => candidate.sourceStart <= sourceOffset && sourceOffset < candidate.sourceEnd);
+    if (page === undefined) {
+      return null;
+    }
+    const element = Array.from(pageWindowElement.children).find(
+      (candidate) => candidate instanceof HTMLElement && candidate.dataset.pageId === page.pageId,
+    );
+    return element instanceof HTMLElement ? element : null;
+  }
+
+  function captureReloadAnchor(sourceOffset: number): ReloadViewportAnchor {
+    const clampedSourceOffset = Math.min(Math.max(0, sourceOffset), Math.max(0, sourceLength() - 1));
+    const pageElement = pageElementForSourceOffset(clampedSourceOffset);
+    const viewportTop = scrollElement.getBoundingClientRect().top;
+    if (pageElement !== null) {
+      return {
+        sourceOffset: clampedSourceOffset,
+        viewportOffset: pageElement.getBoundingClientRect().top - viewportTop,
+      };
+    }
+    const visible = renderedAnchor();
+    const visiblePage = visible === null ? undefined : pages.find((page) => page.pageId === visible.pageId);
+    return {
+      sourceOffset: visiblePage?.sourceStart ?? clampedSourceOffset,
+      viewportOffset: visible?.viewportOffset ?? 0,
+    };
+  }
+
+  function scrollPositionForReloadAnchor(anchor: ReloadViewportAnchor): number | null {
+    const pageElement = pageElementForSourceOffset(anchor.sourceOffset);
+    if (pageElement === null) {
+      return null;
+    }
+    const viewportTop = scrollElement.getBoundingClientRect().top;
+    const pageTop = scrollElement.scrollTop + pageElement.getBoundingClientRect().top - viewportTop;
+    const minimumVisibleOffset = Math.min(0, VIEWPORT_ORIGIN_TOLERANCE - pageElement.offsetHeight);
+    const viewportOffset = Math.max(anchor.viewportOffset, minimumVisibleOffset);
+    return Math.max(0, Math.min(maximumScroll(), pageTop - viewportOffset));
   }
 
   function restoredScrollPosition(anchor: {pageId: string; viewportOffset: number}): number | null {
@@ -415,6 +463,7 @@ export function createLayoutPageViewport(
       geometryRevision += 1;
     },
     captureLayout: () => geometry.snapshot(),
+    captureReloadAnchor,
     clear: () => {
       pages.splice(0, pages.length);
       directory.clear();
@@ -492,6 +541,7 @@ export function createLayoutPageViewport(
       const position = scrollElement.scrollTop + pageElement.getBoundingClientRect().top - viewportTop;
       return Math.max(0, Math.min(maximumScroll(), position));
     },
+    scrollPositionForReloadAnchor,
     setDirectory,
     sourceLength,
     sourceOffsetForScrollPosition,

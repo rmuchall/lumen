@@ -97,6 +97,7 @@ pub(super) struct AgentObservationState {
     pub(super) find_state: String,
     pub(super) find_state_sequence: u64,
     pub(super) ui_state: String,
+    pub(super) ui_state_sequence: u64,
     pub(super) document_work_lifecycle: String,
     pub(super) document_work_kind: String,
     pub(super) document_work_sequence: u64,
@@ -504,16 +505,24 @@ fn handle_request(mut stream: UnixStream) -> std::io::Result<()> {
         return writeln!(stream, "find-probe=requested");
     }
     if request == "ui-state" {
-        return writeln!(stream, "{}", state.ui_state);
+        return writeln!(
+            stream,
+            "ui_state_sequence={} {}",
+            state.ui_state_sequence, state.ui_state
+        );
     }
     if request == "ui-probe" {
+        let previous_sequence = state.ui_state_sequence;
         drop(state);
         APP_HANDLE
             .get()
             .expect("agent application handle must be initialized")
             .emit("agent-observation-ui-probe", ())
             .map_err(std::io::Error::other)?;
-        return writeln!(stream, "ui-probe=requested");
+        return writeln!(
+            stream,
+            "ui-probe=requested after_sequence={previous_sequence}"
+        );
     }
     if request == "tabs" {
         let tabs = crate::document::agent_tabs(

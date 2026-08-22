@@ -115,6 +115,7 @@ async function expectFailure(action: () => Promise<unknown>, expected: string): 
 }
 
 let frontendReadyRequestCount = 0;
+let uiStateRequestCount = 0;
 await withServer(
   (command, socket) => {
     if (command === "hello") {
@@ -214,6 +215,26 @@ await withServer(
           visibleMatchCount: 1,
         }),
       );
+    } else if (command === "ui-probe") {
+      socket.end("ui-probe=requested after_sequence=3\n");
+    } else if (command === "ui-state") {
+      uiStateRequestCount += 1;
+      const sequence = uiStateRequestCount === 1 ? 3 : 4;
+      const notices =
+        sequence === 3
+          ? []
+          : [
+              {
+                dismissLabel: "Dismiss notification",
+                hasAction: false,
+                kind: "information",
+                message: "Document changed on disk and was reloaded.",
+                role: "status",
+                source: "document",
+                title: "Document reloaded",
+              },
+            ];
+      socket.end(`ui_state_sequence=${sequence} ${JSON.stringify(notices)}\n`);
     } else {
       socket.end("error=unexpected-command\n");
     }
@@ -244,6 +265,12 @@ await withServer(
     );
     assertCondition((await client.endViewportTrace(traceId)).outcome === "completed", "viewport trace end failed");
     assertCondition((await client.findState()).highlightMatchesActiveRange, "Find observation parsing failed");
+    const notices = await client.notices();
+    assertCondition(
+      notices[0]?.title === "Document reloaded" && notices[0]?.role === "status",
+      "notice observation sequencing or parsing failed",
+    );
+    assertCondition(uiStateRequestCount === 2, "notice observation accepted stale UI state");
     assertCondition(
       frontendReadyRequestCount === 1,
       "Agent client repeated its ready handshake after frontend readiness",

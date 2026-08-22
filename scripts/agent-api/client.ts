@@ -1,6 +1,7 @@
 import {stat, watch} from "node:fs/promises";
 import {connect} from "node:net";
 import {basename, dirname} from "node:path";
+import {setTimeout as sleep} from "node:timers/promises";
 
 const requestTimeoutMilliseconds = 20_000;
 
@@ -138,6 +139,16 @@ export type AgentWindowState = {
   testGuardTier: string;
   visible: boolean;
   zoomFactor: number;
+};
+
+export type AgentNotice = {
+  dismissLabel: string;
+  hasAction: boolean;
+  kind: "information" | "warning" | "error";
+  message: string;
+  role: string;
+  source: "configuration" | "document";
+  title: string;
 };
 
 export type DocumentWorkEvent = {
@@ -305,6 +316,38 @@ export class AgentClient {
 
   async windowState(): Promise<AgentWindowState> {
     return parseWindowState(await controlRequest(this.#socketPath, "window-state", this.#requestTimeoutMilliseconds));
+  }
+
+  async notices(): Promise<readonly AgentNotice[]> {
+    const probe = await controlRequest(this.#socketPath, "ui-probe", this.#requestTimeoutMilliseconds);
+    const previousSequence = Number(probe.match(/after_sequence=(\d+)/)?.[1]);
+    if (!Number.isSafeInteger(previousSequence)) {
+      throw new Error(`invalid Agent API notice probe: ${probe}`);
+    }
+    const deadline = Date.now() + this.#requestTimeoutMilliseconds;
+    let response = "";
+    while (Date.now() < deadline) {
+      const observation = await controlRequest(this.#socketPath, "ui-state", this.#requestTimeoutMilliseconds);
+      const match = observation.match(/^ui_state_sequence=(\d+) (.*)$/s);
+      if (match !== null && Number(match[1]) > previousSequence) {
+        response = match[2] ?? "";
+        break;
+      }
+      await sleep(10);
+    }
+    if (response.length === 0) {
+      throw new Error("timed out waiting for the Agent API notice observation");
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(response);
+    } catch {
+      throw new Error(`invalid Agent API notice observation: ${response}`);
+    }
+    if (!Array.isArray(parsed) || !parsed.every(isAgentNotice)) {
+      throw new Error(`invalid Agent API notice observation: ${response}`);
+    }
+    return parsed;
   }
 
   async displayedHtml(offset: number, length: number): Promise<AgentInspection> {
@@ -476,6 +519,22 @@ function parseField(field: string): readonly [string, string] | null {
     return null;
   }
   return [field.slice(0, separator), field.slice(separator + 1)];
+}
+
+function isAgentNotice(value: unknown): value is AgentNotice {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const notice = value as Record<string, unknown>;
+  return (
+    typeof notice.hasAction === "boolean" &&
+    typeof notice.dismissLabel === "string" &&
+    ["information", "warning", "error"].includes(String(notice.kind)) &&
+    typeof notice.message === "string" &&
+    typeof notice.role === "string" &&
+    ["configuration", "document"].includes(String(notice.source)) &&
+    typeof notice.title === "string"
+  );
 }
 
 function isAgentCapability(value: string): value is AgentCapability {

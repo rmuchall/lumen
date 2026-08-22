@@ -54,13 +54,13 @@ The `hello` response implemented in `src-tauri/src/agent_api/protocol.rs` is the
 
 `page-displayed <source-offset> [drag-id]` completes when the mounted page window contains the offset. `terminal-layout` completes only after the terminal seek refreshes bounded scroll state. `find-observation` synchronously redraws the existing overlay before returning its bounded active-range state; it does not change the query, document, or viewport.
 
-`watcher-ready` proves that the blocking inotify watcher installed the active directory generation. `watcher-reload` completes after the normal watcher path displays the changed document.
+`watcher-ready` proves that the blocking inotify watcher installed the active directory generation. `watcher-reload` completes only after the shared single-flight watcher path drains its newest pending revision, adopts the restored viewport, and performs the external-generation acknowledgement. Failure is still reported through the ordinary document notice without crashing or blanking the last valid page.
 
 `test-run-state` is accepted only by an isolated development instance launched with the native test-input guard. It updates the fixed test banner and cannot alter product state.
 
 ## Observations and inspection
 
-Bounded observations cover `status`, tabs, Find/UI state, window state, viewport trace, explicit inspection, and document-work lifecycle. They may prove or diagnose a completed shared action, but they are not a private synchronization path.
+Bounded observations cover `status`, tabs, Find/UI state, window state, viewport trace, explicit inspection, and document-work lifecycle. They may prove or diagnose a completed shared action, but they are not a private synchronization path. A UI probe carries the previous observation sequence, and the typed client accepts the resulting notice snapshot only after Rust records a newer sequence; this proves observation delivery without a fixed delay or product-state mutation.
 
 Routine events, observations, and logs contain no document content. `displayed-html <byte-offset> <byte-length>` is the sole explicit rendered-content inspection. It captures at most 64 KiB of the requested UTF-8 range on demand, retains the response only for its matching request, never runs as part of page mounting, and never enters event history or logs. The API provides no arbitrary JavaScript, generic state serialization, filesystem mutation, raw-document dump, remote control, or production access.
 

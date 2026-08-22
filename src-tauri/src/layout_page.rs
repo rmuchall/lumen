@@ -37,7 +37,10 @@ impl LayoutPageDirectory {
     pub(crate) fn page_at_source_offset(&self, source_offset: u64) -> Option<LayoutPage> {
         self.pages
             .iter()
-            .find(|page| page.source_start() <= source_offset && source_offset < page.source_end())
+            .find(|page| {
+                (page.source_start() <= source_offset && source_offset < page.source_end())
+                    || (source_offset == 0 && page.source_start() == 0 && page.source_end() == 0)
+            })
             .copied()
     }
 
@@ -60,7 +63,7 @@ impl LayoutPageDirectory {
 
 impl LayoutPage {
     pub(crate) fn new(source_start: u64, source_end: u64) -> Option<Self> {
-        if source_end <= source_start {
+        if source_end < source_start || (source_end == source_start && source_start != 0) {
             return None;
         }
         Some(Self {
@@ -110,7 +113,8 @@ mod tests {
     use super::{LayoutPage, LayoutPageDirectory};
 
     #[test]
-    fn rejects_empty_and_reversed_ranges() {
+    fn accepts_only_the_empty_document_as_a_zero_length_range() {
+        assert!(LayoutPage::new(0, 0).is_some());
         assert!(LayoutPage::new(4, 4).is_none());
         assert!(LayoutPage::new(5, 4).is_none());
     }
@@ -129,9 +133,10 @@ mod tests {
     }
 
     #[test]
-    fn parses_only_exact_nonempty_wire_ranges() {
+    fn parses_only_exact_document_page_ranges() {
         let page = LayoutPage::new(128, 256).unwrap();
         assert_eq!("128:256".parse(), Ok(page.id()));
+        assert_eq!("0:0".parse(), Ok(LayoutPage::new(0, 0).unwrap().id()));
         assert_eq!("256:128".parse::<super::LayoutPageId>(), Err(()));
         assert_eq!("invalid".parse::<super::LayoutPageId>(), Err(()));
     }

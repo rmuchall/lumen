@@ -1,5 +1,5 @@
 import {createReadStream} from "node:fs";
-import {copyFile, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile} from "node:fs/promises";
+import {appendFile, copyFile, mkdir, mkdtemp, readdir, readFile, rm, stat, unlink, writeFile} from "node:fs/promises";
 import {spawn, type ChildProcess} from "node:child_process";
 import {createHash} from "node:crypto";
 import {cpus, hostname, release, totalmem, type as operatingSystemType} from "node:os";
@@ -676,14 +676,243 @@ async function runCriticalHandoffChecks(environment: TestEnvironment): Promise<v
 async function runWatcherReloadChecks(environment: TestEnvironment): Promise<void> {
   const {socketPath} = environment;
   const watchedFixture = testFixturePath(environment, "reload-on-save.md");
-  await copyFile(join(repositoryRoot, "fixtures", "reload-on-save.md"), watchedFixture);
+  generatePerformanceFixtures({kinds: ["mixed"], sizes: [5]});
+  await copyFile(join(environment.fixtureRoot, "lumen-mixed-5mib.md"), watchedFixture);
   await openFixture(socketPath, watchedFixture);
+  const client = agentApi(socketPath);
+  async function dismissReloadNotice(description: string): Promise<void> {
+    await waitFor(description, async () => {
+      const notices = await client.notices();
+      return notices.some((notice) => notice.source === "document" && notice.kind === "information") ? true : null;
+    });
+    const dismissal = await client.sendAndAwait("notice-dismiss", "document");
+    assertCondition(dismissal.outcome === "completed", `${description} was not dismissed`);
+  }
+  const directoryReady = await client.sendAndAwait("directory-ready");
+  assertCondition(directoryReady.outcome === "completed", "watcher fixture directory did not become ready");
+  const fixtureSize = (await stat(watchedFixture)).size;
+  const seek = await client.sendAndAwait("seek", String(Math.floor(fixtureSize / 2)));
+  assertCondition(seek.outcome === "completed", "watcher fixture did not seek before reload");
+  const seekSettled = await client.sendAndAwait("scroll-settled");
+  assertCondition(seekSettled.outcome === "completed", "watcher fixture seek did not settle before reload");
+  const aligned = await client.status();
+  const offsetScroll = await client.sendAndAwait("scroll", String(aligned.scrollTop + 240));
+  assertCondition(offsetScroll.outcome === "completed", "watcher fixture did not establish a relative viewport offset");
+  const offsetSettled = await client.sendAndAwait("scroll-settled");
+  assertCondition(offsetSettled.outcome === "completed", "watcher fixture viewport did not settle before reload");
+  const beforeReload = await client.status();
+  assertCondition(
+    beforeReload.scrollSourceOffset > 0,
+    `watcher fixture did not establish a nonzero source anchor: ${JSON.stringify({aligned, beforeReload})}`,
+  );
   const watcherReady = await agentApi(socketPath).sendAndAwait("watcher-ready");
   assertCondition(watcherReady.outcome === "completed", "watcher did not become ready");
   const watcherReloadRequest = await agentApi(socketPath).begin("watcher-reload");
-  await writeFile(watchedFixture, "# Reload fixture\n\nThis file changed during an isolated automated test.\n", "utf8");
+  await appendFile(watchedFixture, "\n\nLUMEN_WATCHED_RELOAD_MARKER\n", "utf8");
   const watcherReload = await agentApi(socketPath).await(watcherReloadRequest);
   assertCondition(watcherReload.outcome === "completed", "watcher reload did not complete");
+  assertCondition(
+    (await client.sendAndAwait("scroll-settled")).outcome === "completed",
+    "watched reload viewport did not settle",
+  );
+  const afterReload = await client.status();
+  assertCondition(
+    afterReload.scrollSourceOffset === beforeReload.scrollSourceOffset,
+    `watcher reload lost its semantic source anchor: ${JSON.stringify({afterReload, beforeReload})}`,
+  );
+  assertCondition(
+    Math.abs(afterReload.visiblePageTop - beforeReload.visiblePageTop) <= 4,
+    `watcher reload lost its viewport-relative page offset: ${JSON.stringify({afterReload, beforeReload})}`,
+  );
+  const [reloadNotice] = await waitFor("watched reload notice", async () => {
+    const notices = await client.notices();
+    return notices.some((notice) => notice.source === "document" && notice.kind === "information") ? notices : null;
+  });
+  assertCondition(
+    reloadNotice !== undefined &&
+      reloadNotice.title === "Document reloaded" &&
+      reloadNotice.message === "Document changed on disk and was reloaded." &&
+      reloadNotice.role === "status" &&
+      reloadNotice.dismissLabel === "Dismiss notification" &&
+      !reloadNotice.hasAction,
+    `watched reload notice was incorrect: ${JSON.stringify(reloadNotice)}`,
+  );
+  const dismiss = await client.sendAndAwait("notice-dismiss", "document");
+  assertCondition(dismiss.outcome === "completed", "watched reload notice was not dismissible");
+  const explicitReload = await client.sendAndAwait("reload");
+  assertCondition(explicitReload.outcome === "completed", "explicit reload did not complete");
+  const explicitSettlement = await client.sendAndAwait("scroll-settled");
+  assertCondition(explicitSettlement.outcome === "completed", "explicit reload viewport did not settle");
+  const explicitStatus = await client.status();
+  assertCondition(
+    explicitStatus.scrollSourceOffset === afterReload.scrollSourceOffset &&
+      Math.abs(explicitStatus.visiblePageTop - afterReload.visiblePageTop) <= 4,
+    `explicit reload did not preserve its viewport anchor: ${JSON.stringify({afterReload, explicitStatus})}`,
+  );
+  assertCondition(
+    !(await client.notices()).some((notice) => notice.source === "document"),
+    "explicit-only reload displayed a document-reloaded notice",
+  );
+
+  const shorterReloadRequest = await client.begin("watcher-reload");
+  const shortContents = "# Short reload\n";
+  await writeFile(watchedFixture, shortContents, "utf8");
+  const shorterReload = await client.await(shorterReloadRequest);
+  assertCondition(shorterReload.outcome === "completed", "shorter watcher reload did not complete");
+  assertCondition(
+    (await client.sendAndAwait("scroll-settled")).outcome === "completed",
+    "shorter watcher reload viewport did not settle",
+  );
+  const shorterStatus = await client.status();
+  const shorterTab = (await client.tabs()).find((tab) => tab.active);
+  assertCondition(
+    shorterStatus.sourceLength === Buffer.byteLength(shortContents) &&
+      shorterTab?.sourceOffset === Buffer.byteLength(shortContents) - 1 &&
+      shorterStatus.viewportAnchor === Buffer.byteLength(shortContents) - 1,
+    `shorter watcher reload did not clamp its semantic anchor: ${JSON.stringify({shorterStatus, shorterTab})}`,
+  );
+  assertCondition(
+    (await client.notices()).filter((notice) => notice.source === "document" && notice.kind === "information")
+      .length === 1,
+    "shorter watcher reload did not retain one coalesced information notice",
+  );
+  assertCondition(
+    (await client.sendAndAwait("notice-dismiss", "document")).outcome === "completed",
+    "shorter watcher reload notice was not dismissed",
+  );
+
+  const emptyReloadRequest = await client.begin("watcher-reload");
+  await writeFile(watchedFixture, "", "utf8");
+  const emptyReload = await client.await(emptyReloadRequest);
+  assertCondition(emptyReload.outcome === "completed", "empty watcher reload did not complete");
+  await waitFor("empty watcher revision adoption", async () => {
+    const status = await client.status();
+    return status.sourceLength === 0 ? status : null;
+  });
+  assertCondition(
+    (await client.sendAndAwait("scroll-settled")).outcome === "completed",
+    "empty watcher reload viewport did not settle",
+  );
+  const emptyStatus = await client.status();
+  const emptyInspection = await client.displayedHtml(0, 512);
+  assertCondition(
+    emptyStatus.sourceLength === 0 &&
+      emptyStatus.viewportAnchor === 0 &&
+      emptyInspection.content.includes("layout-page"),
+    `empty watcher reload did not clamp safely: ${JSON.stringify({emptyInspection, emptyStatus})}`,
+  );
+  await dismissReloadNotice("empty watcher reload notice");
+
+  const originalContents = await readFile(join(environment.fixtureRoot, "lumen-mixed-5mib.md"));
+  const restoreFullRequest = await client.begin("watcher-reload");
+  await writeFile(watchedFixture, originalContents);
+  assertCondition(
+    (await client.await(restoreFullRequest)).outcome === "completed",
+    "full watcher fixture restoration did not complete",
+  );
+  await dismissReloadNotice("full watcher fixture restoration notice");
+  const restoredDirectory = await client.sendAndAwait("directory-ready");
+  assertCondition(restoredDirectory.outcome === "completed", "restored watcher directory did not become ready");
+  assertCondition(
+    (await client.sendAndAwait("seek", String(Math.floor(originalContents.length / 2)))).outcome === "completed",
+    "restored watcher fixture did not seek",
+  );
+  assertCondition(
+    (await client.sendAndAwait("scroll-settled")).outcome === "completed",
+    "restored watcher fixture seek did not settle",
+  );
+  const beforePrefixChange = await client.status();
+  const prefixReloadRequest = await client.begin("watcher-reload");
+  await writeFile(watchedFixture, Buffer.concat([Buffer.from("PREFIX-CHANGE\n"), originalContents]));
+  assertCondition(
+    (await client.await(prefixReloadRequest)).outcome === "completed",
+    "prefix watcher reload did not complete",
+  );
+  assertCondition(
+    (await client.sendAndAwait("scroll-settled")).outcome === "completed",
+    "prefix watcher reload viewport did not settle",
+  );
+  const afterPrefixChange = await client.status();
+  assertCondition(
+    afterPrefixChange.viewportAnchor === beforePrefixChange.viewportAnchor,
+    `prefix watcher reload changed the byte anchor: ${JSON.stringify({afterPrefixChange, beforePrefixChange})}`,
+  );
+  await dismissReloadNotice("prefix watcher reload notice");
+
+  const secondFixture = testFixturePath(environment, "link-target.md");
+  await openFixture(socketPath, secondFixture);
+  assertCondition(
+    (await client.sendAndAwait("watcher-ready")).outcome === "completed",
+    "watcher did not reconfigure for inactive-tab coverage",
+  );
+  await appendFile(watchedFixture, "\nINACTIVE_TAB_CHANGE\n", "utf8");
+  const staleTab = await waitFor("inactive changed tab to become stale", async () => {
+    const tab = (await client.tabs()).find((candidate) => !candidate.active);
+    return tab?.stale === true ? tab : null;
+  });
+  const selectChangedTab = await client.sendAndAwait("select-tab", String(staleTab.id));
+  assertCondition(selectChangedTab.outcome === "completed", "inactive changed tab did not reload on selection");
+  const selectedTab = (await client.tabs()).find((tab) => tab.active);
+  assertCondition(
+    selectedTab?.sourceOffset === beforePrefixChange.viewportAnchor,
+    `inactive changed tab did not retain its semantic anchor: ${JSON.stringify(selectedTab)}`,
+  );
+  assertCondition(
+    (await client.notices()).filter((notice) => notice.source === "document" && notice.kind === "information")
+      .length === 1,
+    "inactive changed tab did not display exactly one reload notice after adoption",
+  );
+  assertCondition(
+    (await client.sendAndAwait("notice-dismiss", "document")).outcome === "completed",
+    "inactive changed tab notice was not dismissed",
+  );
+
+  const coalescedReloadRequest = await client.begin("watcher-reload");
+  await appendFile(watchedFixture, "\nCOALESCED_CHANGE_ONE\n", "utf8");
+  await appendFile(watchedFixture, "COALESCED_CHANGE_TWO\n", "utf8");
+  assertCondition(
+    (await client.await(coalescedReloadRequest)).outcome === "completed",
+    "coalesced watcher reload did not complete",
+  );
+  const finalLength = (await stat(watchedFixture)).size;
+  await waitFor("newest coalesced watcher revision", async () => {
+    const status = await client.status();
+    return status.sourceLength === finalLength && !status.pendingPageRequest ? status : null;
+  });
+  const coalescedNotices = await waitFor("coalesced watcher notice", async () => {
+    const notices = await client.notices();
+    return notices.some((notice) => notice.source === "document" && notice.kind === "information") ? notices : null;
+  });
+  assertCondition(
+    coalescedNotices.filter((notice) => notice.source === "document" && notice.kind === "information").length === 1,
+    "coalesced watcher changes stacked notices",
+  );
+  assertCondition(
+    (await client.sendAndAwait("notice-dismiss", "document")).outcome === "completed",
+    "coalesced watcher notice was not dismissed",
+  );
+
+  const displayedBeforeFailure = await client.displayedHtml(0, 512);
+  const failedReloadRequest = await client.begin("watcher-reload");
+  await unlink(watchedFixture);
+  assertCondition(
+    (await client.await(failedReloadRequest)).outcome === "completed",
+    "failed watcher reload event did not complete gracefully",
+  );
+  const [failureNotice] = await waitFor("failed watcher reload notice", async () => {
+    const notices = await client.notices();
+    return notices.some((notice) => notice.source === "document" && notice.kind === "error") ? notices : null;
+  });
+  assertCondition(
+    failureNotice?.kind === "error" && failureNotice.role === "alert",
+    `failed watcher reload did not use the document error path: ${JSON.stringify(failureNotice)}`,
+  );
+  const displayedAfterFailure = await client.displayedHtml(0, 512);
+  assertCondition(
+    displayedAfterFailure.content === displayedBeforeFailure.content,
+    "failed watcher reload discarded the last valid displayed page",
+  );
+  await closeActiveToTabCount(socketPath, 1);
   await closeActive(socketPath);
 }
 

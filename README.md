@@ -33,6 +33,8 @@ The package registers Lumen as a `text/markdown` viewer.
 
 The native File, Edit, View, and Help menus expose the same commands and About Lumen. File → Open starts in the current document's directory, or the home directory when no document is open.
 
+When an open file changes on disk, Lumen reloads it automatically, preserves the current reading position as closely as the new file permits, and shows a dismissible **Document reloaded** notification. If the changed file cannot be read, Lumen keeps the last valid page visible and reports the error instead. An explicit Reload preserves position but does not show the file-change notification.
+
 Hover over a link to show its destination. Web links open in the system browser, readable local Markdown links open in Lumen, and in-document anchors stay in the viewer.
 
 ## Configuration

@@ -1,41 +1,46 @@
-export type RecoverableErrorSource = "configuration" | "document";
-export type RecoverableErrorKind = "warning" | "error";
+export type NoticeSource = "configuration" | "document";
+export type NoticeKind = "information" | "warning" | "error";
 
 type RecoverableNotice = {
   actionElement: HTMLButtonElement;
+  dismissElement: HTMLButtonElement;
   element: HTMLElement;
   messageElement: HTMLSpanElement;
   titleElement: HTMLElement;
 };
 
-export type RecoverableNoticeController = {
-  activate: (source: RecoverableErrorSource) => boolean;
-  clear: (source: RecoverableErrorSource) => void;
+export type NoticeController = {
+  activate: (source: NoticeSource) => boolean;
+  clear: (source: NoticeSource) => void;
   agentObservation: () => string;
-  dismiss: (source: RecoverableErrorSource) => boolean;
+  dismiss: (source: NoticeSource) => boolean;
   element: HTMLElement;
   showConfigurationRestart: (restart: () => void) => void;
-  show: (source: RecoverableErrorSource, kind: RecoverableErrorKind, message: string) => void;
+  showDocumentReloaded: () => boolean;
+  show: (source: NoticeSource, kind: NoticeKind, message: string) => void;
 };
 
-function noticeTitle(source: RecoverableErrorSource, kind: RecoverableErrorKind): string {
+function noticeTitle(source: NoticeSource, kind: NoticeKind): string {
+  if (source === "document" && kind === "information") {
+    return "Document reloaded";
+  }
   const severity = kind === "warning" ? "Warning" : "Error";
   const category = source === "configuration" ? "Configuration error" : "Document error";
   return `${severity}: ${category}`;
 }
 
-export function createRecoverableNoticeController(): RecoverableNoticeController {
+export function createNoticeController(): NoticeController {
   const element = document.createElement("section");
-  const notices = new Map<RecoverableErrorSource, RecoverableNotice>();
+  const notices = new Map<NoticeSource, RecoverableNotice>();
   element.classList.add("recoverable-notices");
 
-  function clear(source: RecoverableErrorSource): void {
+  function clear(source: NoticeSource): void {
     const notice = notices.get(source);
     notice?.element.remove();
     notices.delete(source);
   }
 
-  function dismiss(source: RecoverableErrorSource): boolean {
+  function dismiss(source: NoticeSource): boolean {
     if (!notices.has(source)) {
       return false;
     }
@@ -43,7 +48,7 @@ export function createRecoverableNoticeController(): RecoverableNoticeController
     return true;
   }
 
-  function activate(source: RecoverableErrorSource): boolean {
+  function activate(source: NoticeSource): boolean {
     const notice = notices.get(source);
     if (notice === undefined || notice.actionElement.hidden || notice.actionElement.onclick === null) {
       return false;
@@ -52,7 +57,7 @@ export function createRecoverableNoticeController(): RecoverableNoticeController
     return true;
   }
 
-  function createNotice(source: RecoverableErrorSource): RecoverableNotice {
+  function createNotice(source: NoticeSource): RecoverableNotice {
     const noticeElement = document.createElement("aside");
     const contentElement = document.createElement("div");
     const titleElement = document.createElement("strong");
@@ -60,10 +65,9 @@ export function createRecoverableNoticeController(): RecoverableNoticeController
     const actionElement = document.createElement("button");
     const dismissElement = document.createElement("button");
     noticeElement.classList.add("recoverable-notice");
-    noticeElement.setAttribute("role", "alert");
     contentElement.classList.add("recoverable-notice-content");
     dismissElement.type = "button";
-    dismissElement.setAttribute("aria-label", "Dismiss error message");
+    dismissElement.setAttribute("aria-label", "Dismiss notification");
     dismissElement.textContent = "Dismiss";
     actionElement.hidden = true;
     actionElement.type = "button";
@@ -72,23 +76,38 @@ export function createRecoverableNoticeController(): RecoverableNoticeController
     contentElement.append(titleElement, messageElement);
     noticeElement.append(contentElement, actionElement, dismissElement);
     element.append(noticeElement);
-    return {actionElement, element: noticeElement, messageElement, titleElement};
+    return {actionElement, dismissElement, element: noticeElement, messageElement, titleElement};
   }
 
   function agentObservation(): string {
     const state = [...notices.entries()].map(([source, notice]) => ({
+      dismissLabel: notice.dismissElement.getAttribute("aria-label") ?? "",
       hasAction: !notice.actionElement.hidden,
-      kind: notice.element.classList.contains("recoverable-error") ? "error" : "warning",
+      kind: notice.element.classList.contains("recoverable-error")
+        ? "error"
+        : notice.element.classList.contains("recoverable-information")
+          ? "information"
+          : "warning",
+      message: notice.messageElement.textContent ?? "",
+      role: notice.element.getAttribute("role") ?? "",
       source,
+      title: notice.titleElement.textContent ?? "",
     }));
     return JSON.stringify(state);
   }
 
-  function show(source: RecoverableErrorSource, kind: RecoverableErrorKind, message: string): void {
+  function show(source: NoticeSource, kind: NoticeKind, message: string): void {
     const notice = notices.get(source) ?? createNotice(source);
     notices.set(source, notice);
+    notice.element.classList.toggle("recoverable-information", kind === "information");
     notice.element.classList.toggle("recoverable-warning", kind === "warning");
     notice.element.classList.toggle("recoverable-error", kind === "error");
+    notice.element.setAttribute("role", kind === "information" ? "status" : "alert");
+    if (kind === "information") {
+      notice.element.setAttribute("aria-live", "polite");
+    } else {
+      notice.element.removeAttribute("aria-live");
+    }
     notice.actionElement.hidden = true;
     notice.actionElement.onclick = null;
     notice.titleElement.textContent = noticeTitle(source, kind);
@@ -99,12 +118,23 @@ export function createRecoverableNoticeController(): RecoverableNoticeController
     const notice = notices.get("configuration") ?? createNotice("configuration");
     notices.set("configuration", notice);
     notice.element.classList.add("recoverable-warning");
-    notice.element.classList.remove("recoverable-error");
+    notice.element.classList.remove("recoverable-error", "recoverable-information");
+    notice.element.setAttribute("role", "alert");
+    notice.element.removeAttribute("aria-live");
     notice.titleElement.textContent = "Restart required";
     notice.messageElement.textContent = "Lumen configuration changed. Restart Lumen to apply it.";
     notice.actionElement.hidden = false;
     notice.actionElement.onclick = restart;
   }
 
-  return {activate, agentObservation, clear, dismiss, element, show, showConfigurationRestart};
+  function showDocumentReloaded(): boolean {
+    const documentNotice = notices.get("document");
+    if (documentNotice?.element.classList.contains("recoverable-error")) {
+      return false;
+    }
+    show("document", "information", "Document changed on disk and was reloaded.");
+    return true;
+  }
+
+  return {activate, agentObservation, clear, dismiss, element, show, showConfigurationRestart, showDocumentReloaded};
 }

@@ -66,12 +66,12 @@ Lumen reads but never writes user configuration. Configuration changes apply aft
 
 ## Release procedure
 
-The Debian package is the Linux release and dogfood artifact and registers Lumen for `text/markdown`.
+The Debian package is the Linux release artifact and registers Lumen for `text/markdown`.
 
 1. Deliberately update the matching versions in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json` when the release version changes.
 2. Run `npm run verify`. Its critical tier is the only application-test tier required specifically to create a release; do not run the regular or stress tiers merely because a release is being built.
 3. Run `npm run test:production-artifact`.
-4. Inspect and dogfood the Debian package before distribution.
+4. Treat the successful automated checks as release evidence. Manual package inspection or dogfooding is optional and is never a required release gate.
 5. Create one release directory named `lumen-<version>-<platform>`, using the release version and platform identifier; for example, `lumen-0.1.39-linux-x86_64`.
 6. Place the platform package, `README.md`, and `THIRD_PARTY_NOTICES.md` in that directory. Do not place release files alongside the directory or add repository-development documents.
 

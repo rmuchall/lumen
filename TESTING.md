@@ -6,6 +6,8 @@ Do not guess at a defect or optimisation. Reproduce it, capture the smallest rel
 
 Any automated failure, including an intermittent failure, invalid completion output, or dirty teardown, takes priority over product work. A suite is not a trustworthy regression guard until the failure is isolated and eliminated.
 
+Implementation and release completion are fully autonomous and use automated evidence exclusively. No manual human testing, inspection, package dogfooding, or confirmation is required. Human observation is optional diagnostic input only and is never a completion receipt, release gate, or substitute for deterministic automation.
+
 ## Isolated application contract
 
 Every tier and focused case is self-contained and owns exactly one Lumen process, private XDG directories, one agent socket, one OS-assigned Vite port, and one temporary root. It must begin from a clean slate, request normal Lumen shutdown, tear down its owned resources, and prove that no owned process, socket, or temporary root remains.
@@ -18,7 +20,7 @@ A test must never:
 - replace semantic completion with a delay, timing threshold, polling shortcut, or private state mutation; or
 - import test code or fixtures into production artifacts.
 
-Native cross-process file-manager forwarding remains manual dogfood coverage. Automated coverage exercises the primary-instance receiver inside its one process.
+Native cross-process file-manager forwarding may be dogfooded optionally, but it is not required completion evidence. Required automated coverage exercises the primary-instance receiver inside its one process.
 
 ### Native input guard
 
@@ -74,7 +76,7 @@ Large fixtures and their adjacent marker manifests are persistent read-only inpu
 
 Scroll-drag cases use the normal shared scroll-container action, held-drag lifecycle, and bounded viewport trace. They prove the final reader-visible page, non-blank mounted window, marker, Find state, and current generations. A terminal geometry reconciliation may legitimately change the physical scroll range, but not the semantic reader endpoint. These cases model deterministic Lumen-owned DOM behaviour; they do not claim to measure GNOME overlay painting or physical pointer latency.
 
-The application suite covers launch and empty state, tabs, links, Find, notices, configuration, watcher lifecycle, structural Markdown, images, syntax, page boundaries, direct and held-drag seeks, terminal content, stale-work rejection, bounded resource release, tab restoration, and protocol isolation. Rust tests cover parser, source, layout planning, index, search, cache, watcher, and socket boundaries. The TypeScript geometry suite covers prefix sums, inverse lookup, measurements, width epochs, snapshots, and anchor round-trips.
+The application suite covers launch and empty state, tabs, links, Find, notices, configuration, watcher lifecycle, structural Markdown, images, syntax, page boundaries, direct and held-drag seeks, terminal content, stale-work rejection, bounded resource release, tab restoration, and protocol isolation. Watcher coverage includes exact semantic and viewport-relative restoration, shorter/empty clamping, changes before and after the anchor, inactive-tab adoption, rapid-event coalescing, explicit-reload exclusion, accessible information notices, and graceful file-loss failure. Rust tests cover parser, source, layout planning, index, search, cache, watcher, and socket boundaries. The TypeScript geometry suite covers prefix sums, inverse lookup, measurements, width epochs, snapshots, and anchor round-trips.
 
 ## Diagnostics and logs
 
@@ -103,4 +105,4 @@ Never optimise with a splash screen, artificial delay, cache flushing, force-ter
 
 ## Regression policy
 
-Add the smallest reliable regression test for a reproducible defect. Keep pixel-level WebKit and desktop-owned presentation checks manual unless a stable local semantic assertion exists. Every retained test must remain deterministic, focused, independently runnable, and cleanly composable.
+Add the smallest reliable automated regression test for a reproducible defect. Prefer stable semantic assertions or bounded automated visual inspection. When pixel-level WebKit or desktop-owned presentation cannot be asserted reliably, do not add a brittle check and do not replace it with a required manual test. Every retained test must remain deterministic, focused, independently runnable, and cleanly composable.

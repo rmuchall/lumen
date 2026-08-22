@@ -1,4 +1,4 @@
-# Markdown rendering comparison
+# Markdown blah blah xxxxxxxx
 
 This fixture is intentionally small and is used to compare Lumen with third-party Markdown applications.
 

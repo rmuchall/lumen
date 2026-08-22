@@ -14,6 +14,8 @@ Read [DEVELOPMENT.md](DEVELOPMENT.md) before changing the repository. It is the 
 
 ## Change policy
 
+- Complete implementation tasks fully autonomously from diagnosis through verified cleanup. Automated evidence is authoritative; no manual human testing, inspection, dogfooding, or confirmation is required for completion. Follow [TESTING.md](TESTING.md) for the automation contract.
+- Within the active task's scope, full destructive authority over this repository's contents is permanently granted: modify, rename, replace, move, or delete any source, test, fixture, script, asset, API, directory, or document needed for the best implementation without seeking separate file-operation approval. This does not broaden the requested feature scope, permit unrelated user changes to be discarded, waive dependency approval, authorize Git-history/publication operations, or permit destructive work outside the repository.
 - Keep the project footprint as small as possible. Do not import templates or generated scaffolds; the Tauri integration is maintained manually.
 - Add only what the active task requires. Prefer direct code over abstractions for hypothetical future work, compatibility fallbacks, or retained legacy paths.
 - Do not add an external dependency without the user's explicit agreement. Before requesting approval, compare the smallest local implementation with the leanest robust dependency, its exact enabled features, and its dependency closure. Prefer local code when its maintenance cost is low; otherwise prefer the leanest robust dependency. Pin every accepted version exactly.
@@ -26,8 +28,8 @@ Read [DEVELOPMENT.md](DEVELOPMENT.md) before changing the repository. It is the 
 
 - Diagnose before fixing: gather evidence with the existing diagnostics and focused tests, identify the failure, then implement the smallest verified correction.
 - Any automated-test failure, including an intermittent failure or invalid completion receipt, takes priority over product work. Follow [TESTING.md](TESTING.md) exactly.
-- Add the smallest reliable regression test for an observable bug. Keep platform-owned or purely visual checks manual when automation would be brittle.
-- Never retain obsolete or parallel implementations. A clean replacement is preferred even when it is destructive.
+- Add the smallest reliable automated regression test for an observable bug. Never make manual human testing a completion or release gate; omit brittle pixel-level assertions in favour of stable semantic or automated visual evidence.
+- Leave zero legacy code. Prefer one full, clean implementation even when replacement is destructive; never retain obsolete or parallel implementations, compatibility shims, deprecated aliases, dead branches, commented-out replacements, rejected spikes, stale tests, unused fixtures/assets, or superseded documentation.
 - Do not weaken or suppress Clippy, OXLint, OXFmt, or TypeScript rules. Use braces for control flow, avoid TypeScript `any`, use explicit module-boundary types, and prefer named functions when they are clearer.
 - After source changes, run the applicable checks listed in [DEVELOPMENT.md](DEVELOPMENT.md). Rust changes must pass formatting, Clippy with warnings denied, and Rust tests.
 

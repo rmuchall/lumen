@@ -45,6 +45,7 @@ macro_rules! application_invoke_handler {
         tauri::generate_handler![
             document_links::activate_link,
             viewer_api::viewer_snapshot,
+            viewer_api::acknowledge_external_reload,
             shared_actions::documents::open_document_with_viewer_position,
             document::save_document_viewer_position,
             viewer_api::viewer_page_batch,
@@ -86,6 +87,7 @@ macro_rules! application_invoke_handler {
         tauri::generate_handler![
             document_links::activate_link,
             viewer_api::viewer_snapshot,
+            viewer_api::acknowledge_external_reload,
             shared_actions::documents::open_document_with_viewer_position,
             document::save_document_viewer_position,
             viewer_api::viewer_page_batch,
